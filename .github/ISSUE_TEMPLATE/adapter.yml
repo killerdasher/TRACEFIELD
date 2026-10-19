@@ -1,0 +1,61 @@
+name: Adapter proposal
+description: Propose an integration with an external tool or provider
+title: "[adapter] "
+labels: ["adapter-proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read the adapter rules in CONTRIBUTING.md first. TRACEFIELD
+        integrations are opt-in, polite, and fail closed. Proposals that
+        primarily enable harassment, bulk scraping against ToS, or block
+        circumvention will be rejected.
+  - type: input
+    id: tool
+    attributes:
+      label: Tool / provider name + upstream URL
+    validations:
+      required: true
+  - type: textarea
+    id: capability
+    attributes:
+      label: Capability
+      description: What does it do, and what would TRACEFIELD store as an Observation?
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network policy
+      options:
+        - "none (local binary / offline)"
+        - "opt-in (explicit flag required)"
+        - "always (rejected for P0/P1)"
+    validations:
+      required: true
+  - type: textarea
+    id: credentials
+    attributes:
+      label: Credential requirement (variable names only, never values)
+  - type: textarea
+    id: failure_modes
+    attributes:
+      label: Failure taxonomy mapping
+      description: How do UNAVAILABLE / RATE_LIMITED / BLOCKED / TIMEOUT / PROVIDER_ERROR / POLICY_REFUSED map onto this tool's real behaviour?
+    validations:
+      required: true
+  - type: textarea
+    id: tos
+    attributes:
+      label: ToS / rate-limit / abuse-desk notes
+      description: Terms URL, stated rate limits, contact for abuse. "Unknown" is an acceptable answer — say so.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Commitments
+      options:
+        - label: Adapter will return observation payloads and never write to the case store directly
+        - label: No block-circumvention, no stealth features, default ≤1 req/s for profile-style checks
+        - label: Licence of the upstream tool permits linking/integration (bundling GPL code into this Apache-2.0 repo would need separate discussion)

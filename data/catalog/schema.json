@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/killerdasher/TRACEFIELD/data/catalog/schema.json",
+  "title": "TRACEFIELD CatalogEntry",
+  "description": "Strict schema for one JSONL line in tools.jsonl. Entries are inert metadata, never executable code.",
+  "type": "object",
+  "required": [
+    "schema_version", "id", "canonical_name", "entry_type",
+    "first_seen", "last_checked"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "canonical_name": { "type": "string", "minLength": 1 },
+    "aliases": { "type": "array", "items": { "type": "string" } },
+    "entry_type": {
+      "enum": ["cli_tool", "library", "api_service", "website", "dataset", "reference", "workflow"]
+    },
+    "categories": { "type": "array", "items": { "type": "string" } },
+    "capabilities": { "type": "array", "items": { "type": "string" } },
+    "description": { "type": "string" },
+    "upstream_url": { "type": "string" },
+    "repo_url": { "type": "string" },
+    "upstream_version": { "type": "string" },
+    "license_id": { "type": "string" },
+    "license_source": { "type": "string" },
+    "license_review_state": { "type": "string" },
+    "pricing_class": {
+      "enum": ["free", "open_source", "free_tier", "paid", "freemium", "unknown"]
+    },
+    "key_required": { "enum": ["yes", "no", "unknown"] },
+    "key_env_vars": { "type": "array", "items": { "type": "string" } },
+    "auth_method": { "type": "string" },
+    "rate_limits": { "type": "string" },
+    "terms_url": { "type": "string" },
+    "network_required": { "type": "string" },
+    "data_exposure_warning": { "type": "string" },
+    "passive_active": { "type": "string" },
+    "maintenance_status": { "enum": ["active", "quiet", "archived", "unknown"] },
+    "verification_state": { "type": "string" },
+    "integration_state": {
+      "enum": ["indexed", "verified", "integrated", "healthy", "stale", "unavailable", "unverified"]
+    },
+    "first_seen": { "type": "string" },
+    "last_checked": { "type": "string" },
+    "health_checked_at": { "type": "string" },
+    "health_result": { "type": "string" },
+    "limitations": { "type": "string" },
+    "duplicate_group": { "type": "string" },
+    "source_list": { "type": "string" },
+    "attribution": { "type": "string" }
+  }
+}

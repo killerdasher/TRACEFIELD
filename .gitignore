@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Local investigation data (never commit case data)
+cases/
+*.tfcase
+*.tfdb
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,53 @@
+name: Provider / catalogue update
+description: Correct, add, or remove a tool catalogue entry
+title: "[catalogue] "
+labels: ["catalogue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The catalogue is **inert data**. Do not attach scripts, config, or
+        anything executable. Descriptions must be your own factual prose —
+        do not copy text from CC BY-SA or unlicensed sources.
+  - type: input
+    id: entry_id
+    attributes:
+      label: Catalogue entry id
+      placeholder: "tool id from data/catalog/tools.jsonl"
+  - type: dropdown
+    id: change_type
+    attributes:
+      label: Change type
+      options:
+        - Add a new entry
+        - Correct an existing entry (link, metadata, licence)
+        - Entry is dead / unmaintained
+        - Licence or attribution issue
+    validations:
+      required: true
+  - type: input
+    id: upstream_url
+    attributes:
+      label: Upstream URL
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence for the change
+      description: Dates, licence file text/URL, HTTP status, last-activity observed. Links to primary sources only.
+    validations:
+      required: true
+  - type: input
+    id: license
+    attributes:
+      label: Licence (SPDX id, as written in the upstream licence file)
+      placeholder: "MIT / GPL-2.0 / NOASSERTION"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Rules
+      options:
+        - label: I have read CONTRIBUTING.md's catalogue rules
+        - label: This change carries no copied prose from CC BY-SA or unlicensed sources
+        - label: No credentials, API key values, or personal data appear in this issue

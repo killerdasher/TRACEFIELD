@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose a new capability or behaviour change
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What field-workflow gap does this fill? "X tool has it" is not a problem statement.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: CLI shape, exit codes, JSON schema, TUI surface — as concretely as you can.
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Does this require network access?
+      options:
+        - "No — local only"
+        - "Opt-in network (explicit flag)"
+        - "Always-on network"
+    validations:
+      required: true
+  - type: textarea
+    id: honesty
+    attributes:
+      label: Claim-honesty implications
+      description: What must the tool refuse to claim? What caveats apply? (This project rejects features that cannot state their limits.)
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues and the planned-work section of the README
+        - label: I am willing to help implement this (optional)

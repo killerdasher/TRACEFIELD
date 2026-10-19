@@ -1,0 +1,22 @@
+{
+  "notes": [],
+  "schema_version": 1,
+  "sources": [
+    {
+      "data_license": "CC BY-SA 4.0",
+      "note": "names+URLs only; descriptions project-authored",
+      "record_count": 1373,
+      "retrieved_at": "2026-10-17T15:19:47Z",
+      "source_name": "Awesome OSINT",
+      "source_url": "https://github.com/jivoi/awesome-osint"
+    },
+    {
+      "data_license": "MIT (source repository)",
+      "record_count": 881,
+      "retrieved_at": "2026-10-17T15:19:47Z",
+      "source_name": "OSINT Framework",
+      "source_url": "https://osintframework.com/"
+    }
+  ],
+  "updated_at": "2026-10-17T15:19:48Z"
+}
