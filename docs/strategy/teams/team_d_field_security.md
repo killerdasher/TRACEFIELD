@@ -2,7 +2,7 @@
 
 > Simulated role-based review conducted by independent review subagents on 2026-10-16. These are role perspectives, not interviews with real people. External facts were verified via live web checks on this date where marked.
 
-**Review target:** working tree at `/home/dasher/Desktop/github/TRACEFIELD` (version `0.1.0`, Python 3.13 venv present).
+**Review target:** repository working tree at the project root (version `0.1.0`, Python 3.13 venv present).
 **Method:** static reading of every file named below, plus black-box runs of the installed `tracefield` console script against a scratch `TRACEFIELD_HOME`, plus live HTTP GETs to the public pages named in D2/D3 (all dated **2026-10-16**). Anything not observed or not sourced is marked **unknown**.
 **Cross-cutting observation (applies to all five roles):** `tests/` is **empty** (0 test files) even though `pyproject.toml` defines pytest markers including `security` and `network`, and `filterwarnings = ["error"]`. Every acceptance criterion below is therefore currently unenforced.
 

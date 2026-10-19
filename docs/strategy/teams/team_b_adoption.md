@@ -16,7 +16,7 @@ experience and docs, terminal brand systems, and maintainer/community sustainabi
   dates, unless stated otherwise.
 
 **Local baseline used throughout** (verified by reading the working tree at
-`/home/dasher/Desktop/github/TRACEFIELD` and executing the installed CLI into a scratch data root
+the repository root and executing the installed CLI into a scratch data root
 `TRACEFIELD_HOME=/tmp/opencode/tfhome`):
 - Implemented commands (read from `src/tracefield/cli/main.py` and confirmed in `tracefield --help`):
   `doctor`, `init`, `hash`, `inspect`, `ocr`, `report`, `case-export`, `case-delete`, `tui`,

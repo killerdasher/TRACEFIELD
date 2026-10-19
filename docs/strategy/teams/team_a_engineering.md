@@ -2,7 +2,7 @@
 
 > Simulated role-based review conducted by independent review subagents on 2026-10-16. These are role perspectives, not interviews with real people.
 
-**Unit under review:** TRACEFIELD v0.1.0 (`/home/dasher/Desktop/github/TRACEFIELD`), ~4,356 lines of Python under `src/tracefield/`, no tests, no CI workflow files, no docs, no catalogue data.
+**Unit under review:** TRACEFIELD v0.1.0 (repository root), ~4,356 lines of Python under `src/tracefield/`, no tests, no CI workflow files, no docs, no catalogue data.
 
 **Method.** Every claim below is grounded in code that was read line-by-line and/or exercised on this machine on 2026-10-16. Commands executed during this review (against a scratch `TRACEFIELD_HOME=/tmp/opencode/tfhome*`):
 
