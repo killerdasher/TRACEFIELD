@@ -419,6 +419,14 @@ def test_synthetic_demo_end_to_end(demo_env) -> None:
     assert claim["id"] in assessments
     assert assessments[claim["id"]]["rule_version"] == a_unrev["rule_version"]
 
+    # HTML report: self-contained, escaped, same digests and caveats.
+    html_code, html_out, _ = _run(monkeypatch, capsys, ["report", case, "--format", "html"])
+    assert html_code == EXIT_OK
+    assert html_out.startswith("<!DOCTYPE html>")
+    assert "<script" not in html_out
+    assert ev_a1["sha256"] in html_out
+    assert "not truthfulness" in html_out
+
     # -- 10. Export: privacy-aware metadata advisory + manifest -------------
     out_dir = fx.parent / "export"
     code, _, err = _run(monkeypatch, capsys, ["case-export", case, "--output", str(out_dir)])

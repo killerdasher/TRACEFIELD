@@ -9,7 +9,7 @@
 
 | Gate | Result |
 |---|---|
-| `pytest -m "not network"` | **203 passed** (81 unit, 98 integration, 23 security, 1 e2e) |
+| `pytest -m "not network"` | **207 passed** (85 unit, 98 integration, 23 security, 1 e2e) |
 | `ruff check src tests` | **clean** |
 | `ruff format --check src tests` | **clean** (49 files) |
 | `mypy src` (strict) | **clean**, 34 files |

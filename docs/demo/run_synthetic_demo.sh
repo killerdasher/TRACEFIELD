@@ -121,8 +121,10 @@ $TF relation review "$REL_C" --state unreviewed
 banner "9. hash-chained analysis events verify"
 $TF analyze events --case "SYNTHETIC-demo-acme-breach"
 
-banner "10. report (Markdown) — links, IDs, digests, rule versions, caveats"
+banner "10. report (Markdown + HTML) — links, IDs, digests, rule versions, caveats"
 $TF report "SYNTHETIC-demo-acme-breach" --format markdown
+$TF report "SYNTHETIC-demo-acme-breach" --format html --output "$WORK/report.html"
+echo "--- HTML report written to $WORK/report.html (self-contained, no external resources) ---"
 
 banner "11. privacy-aware export: SENSITIVE_METADATA lists keys, never values"
 $TF case-export "SYNTHETIC-demo-acme-breach" --output "$OUT"

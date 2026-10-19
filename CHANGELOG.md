@@ -19,8 +19,9 @@ Initial implementation. Shipped across the first build sessions,
   with analyst review; origin clustering (origin-r3 containment, ordered
   k=3/4/5 shingles, `related_text` advisory edges); contradiction candidates
   (dates, digests, quantities — always severity `candidate`); `analyze claim`
-  decision table pinned by tests; `report` (JSON/Markdown) with caveats, rule
-  versions, `generated_at`.
+  decision table pinned by tests; `report` (Markdown/JSON/HTML) with caveats,
+  rule versions, `generated_at`; HTML reports are self-contained, fully
+  escaped, and load no external resources.
 - **Field tools**: `hash`, `inspect [--deep]` (exiftool/ffprobe with honest
   UNAVAILABLE states), `ocr` (tesseract wrapper), `fetch --fetch`
   (doubly-opt-in, connection-pinned, SSRF-guarded), `username check`

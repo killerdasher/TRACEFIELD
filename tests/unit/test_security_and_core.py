@@ -256,3 +256,116 @@ class TestDomain:
 
     def test_outcome_labels_are_six(self) -> None:
         assert len(list(OutcomeLabel)) == 6
+
+
+# ---------------------------------------------------------------------------
+# HTML report rendering (XSS safety)
+# ---------------------------------------------------------------------------
+
+
+def _xss_payload() -> dict:
+    """Minimal report payload with attacker-shaped strings in every field."""
+    evil = "<script>alert(1)</script>"
+    return {
+        "report_schema_version": 1,
+        "case": {
+            "id": "case_x",
+            "title": evil,
+            "status": "open",
+            "purpose": evil,
+            "scope": evil,
+            "created_at": "2026-10-19T00:00:00Z",
+        },
+        "counts": {"sources": 1, "claims": 1, "evidence": 1, "relations": 0},
+        "global_caveats": [evil],
+        "sources": [
+            {
+                "id": "src_x",
+                "locator": "javascript:alert(1)",
+                "source_type": "website",
+                "access_method": "direct",
+                "first_seen_at": "2026-10-19T00:00:00Z",
+                "collected_at": "",
+                "published_at": "",
+                "limitations": evil,
+            }
+        ],
+        "evidence": [
+            {
+                "id": "ev_x",
+                "sha256": "0" * 64,
+                "media_type": "text/plain",
+                "size_bytes": 1,
+                "source_id": "src_x",
+                "captured_at": "2026-10-19T00:00:00Z",
+                "storage_ref": evil,
+            }
+        ],
+        "claims": [
+            {
+                "id": "clm_x",
+                "text": evil,
+                "status": "active",
+                "review_state": "unreviewed",
+            }
+        ],
+        "assessments": [
+            {
+                "claim_id": "clm_x",
+                "outcome": "INSUFFICIENT_EVIDENCE",
+                "rule_version": "assess-r2",
+                "supporting_count": 0,
+                "contradicting_count": 0,
+                "independence": "not assessed",
+                "caveats": [evil],
+            }
+        ],
+        "relations": [],
+        "origin_clusters": [],
+    }
+
+
+class TestHtmlReport:
+    def test_is_self_contained_document(self) -> None:
+        from tracefield.reporting.build import render_html
+
+        out = render_html(_xss_payload())
+        assert out.startswith("<!DOCTYPE html>")
+        assert out.rstrip().endswith("</html>")
+        # No external resources or scripts — local-first, no CDN, no JS.
+        assert "<script" not in out
+        assert "http://" not in out.split("<style>")[0]  # head has no remote refs
+        assert "src=" not in out
+
+    def test_every_injected_tag_is_escaped(self) -> None:
+        from tracefield.reporting.build import render_html
+
+        out = render_html(_xss_payload())
+        # The literal attacker string must never survive unescaped.
+        assert "<script>alert(1)</script>" not in out
+        # Escaped form must be present (proves the content rendered, not dropped).
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in out
+
+    def test_javascript_locator_never_becomes_href(self) -> None:
+        from tracefield.reporting.build import render_html
+
+        out = render_html(_xss_payload())
+        assert 'href="javascript:' not in out
+        # The locator text is still shown, escaped as plain text.
+        assert "javascript:alert(1)" in out
+
+    def test_valid_payload_renders_all_sections(self) -> None:
+        from tracefield.reporting.build import render_html
+
+        out = render_html(_xss_payload())
+        for needle in (
+            "Case Report",
+            "Caveats",
+            "Sources",
+            "Evidence",
+            "Claims and Assessments",
+            "INSUFFICIENT_EVIDENCE",
+            "assess-r2",
+            "workflow states",
+        ):
+            assert needle in out, needle

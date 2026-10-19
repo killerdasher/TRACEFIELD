@@ -1503,7 +1503,7 @@ def ocr(
 @app.command()
 def report(
     case: str = typer.Argument(..., help="Case ID or title."),
-    fmt: str = typer.Option("markdown", "--format", "-f", help="markdown|json"),
+    fmt: str = typer.Option("markdown", "--format", "-f", help="markdown|json|html"),
     output: Path = typer.Option(None, "--output", "-o", help="Write to file."),
 ) -> None:
     """Build a human-reviewable report with caveats and provenance."""
@@ -1513,8 +1513,8 @@ def report(
     db = open_db(settings)
     try:
         case_obj = resolve_case(CaseRepo(db), case)
-        if fmt not in ("markdown", "json"):
-            fail(f"unsupported format {fmt!r} (use markdown or json)", EXIT_USAGE)
+        if fmt not in ("markdown", "json", "html"):
+            fail(f"unsupported format {fmt!r} (use markdown, json, or html)", EXIT_USAGE)
         text = build_report(settings, db, case_obj, fmt=fmt)
         if output:
             output.write_text(text, encoding="utf-8")

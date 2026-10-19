@@ -1,9 +1,9 @@
-Script started on 2026-10-20 00:14:02+03:00 [COMMAND="bash docs/demo/run_synthetic_demo.sh" <not executed on terminal>]
+Script started on 2026-10-20 00:54:19+03:00 [COMMAND="bash docs/demo/run_synthetic_demo.sh" <not executed on terminal>]
 
 === SYNTHETIC DEMO — no real persons, no live targets, no network ===
 TRACEFIELD: tracefield 0.1.0
-data root : /tmp/tracefield-demo.3asm0W/home
-workdir   : /tmp/tracefield-demo.3asm0W
+data root : /tmp/tracefield-demo.cXhlcx/home
+workdir   : /tmp/tracefield-demo.cXhlcx
 
 === 0. doctor (local environment only) ===
                                          tracefield doctor                                          
@@ -12,7 +12,7 @@ workdir   : /tmp/tracefield-demo.3asm0W
 ┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
 │ python         │ ok       │ 3.13.5                                                               │
 │ version        │ ok       │ 0.1.0                                                                │
-│ database       │ ok       │ schema v1 at /tmp/tracefield-demo.3asm0W/home/tracefield.sqlite3     │
+│ database       │ ok       │ schema v1 at /tmp/tracefield-demo.cXhlcx/home/tracefield.sqlite3     │
 │ exiftool       │ ok       │ /usr/bin/exiftool                                                    │
 │ ffprobe        │ ok       │ /usr/bin/ffprobe                                                     │
 │ tesseract      │ missing  │ OCR backend unavailable — related commands will report UNAVAILABLE,  │
@@ -25,58 +25,58 @@ workdir   : /tmp/tracefield-demo.3asm0W
 └────────────────┴──────────┴──────────────────────────────────────────────────────────────────────┘
 
 === 1. case create with declared purpose and scope ===
-created case case_792ff819ed184ac6
+created case case_9f434af5a8984217
   title:   SYNTHETIC-demo-acme-breach
   purpose: SYNTHETIC demonstration of the provenance workflow
   scope:   local synthetic fixtures only; no real persons
 
 === 2. sources: two syndicated wire copies + one distinct + one contrary ===
-sources: a1=src_a8ef77176f9449fb a2=src_2a97fd0f58ac4606 b=src_796ac78d9ae148ff c=src_626f9a894d9e4569
+sources: a1=src_6ac532c5ac98450b a2=src_823e3761bba64f4f b=src_1f7b42fe45ca47d2 c=src_1de3a7228b304990
 
 === 3. evidence attach (SHA-256, immutable 0400 copies) with excerpts ===
-evidence: ev_c79d7fbe46924fda ev_cdf6cdbd640640e7 ev_496b692e371e4dc2 ev_db9e267dc4e74674
+evidence: ev_cc6bfc2fbdb44688 ev_3e30169bca2d41d5 ev_843622dda4c540c3 ev_e0a9da70ca664297
 
 === 4. metadata-bearing fixtures: GPS JSON + generated PNG ===
-attached evidence ev_818165775748416c
+attached evidence ev_9d8eab289905437a
   sha256:    534760307eb1bd4fa2dc19056088b90903f186a763434e9aa95e19febaba048b
   media:     application/json
   size:      246 bytes
   storage:   evidence/53/534760307eb1bd4fa2dc19056088b90903f186a763434e9aa95e19febaba048b
-attached evidence ev_8cba354504de476c
+attached evidence ev_8576eb1d3dfe4b75
   sha256:    b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640
   media:     image/png
   size:      69 bytes
   storage:   evidence/b1/b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640
-recorded observation obs_54dc8c1fa7894e76
+recorded observation obs_c39a8c6c78424977
   tool:   manual-fixture-gen
   summary: generated synthetic fixtures for the demo case
 an observation is a raw return — not a verified fact until reviewed
 
 === 5. claim + relations (analyst review required before anything counts) ===
-claim: clm_35d9f321f32d4a68
-relations: rel_e7b315bf7dc04a1f rel_883089b4ec0f479b rel_c9c35ca2504043d8 rel_73e56efadbbe484e (all start unreviewed)
+claim: clm_0ed2d10d4c2c42e6
+relations: rel_8200ef388b2b405e rel_403399e392c54fd5 rel_40c36a5786e34e8b rel_1f9c19d4c8db41c3 (all start unreviewed)
 
 === 6. origin clustering — syndicated copies must merge (origin-r3) ===
 note: skipped 2 source(s) with no clusterable document text
-cluster ocl_b5755527b33443b8  
-  members: src_2a97fd0f58ac4606, src_a8ef77176f9449fb
-  indicator: src_a8ef77176f9449fb~src_2a97fd0f58ac4606: near_duplicate_text>=0.8 (0.857)
+cluster ocl_c67ddcf2670f4719  
+  members: src_6ac532c5ac98450b, src_823e3761bba64f4f
+  indicator: src_6ac532c5ac98450b~src_823e3761bba64f4f: near_duplicate_text>=0.8 (0.857)
 clusters are hypotheses — confirm/reject after review; copies in one cluster must not be counted as 
 independent confirmations
 
 === 7. contradiction candidates — dates from excerpts, severity=candidate ===
 candidate date: 2026-03-01 vs 2026-03-15
-  ev_c79d7fbe46924fda vs ev_db9e267dc4e74674  (rules contra-r2, severity=candidate)
+  ev_cc6bfc2fbdb44688 vs ev_e0a9da70ca664297  (rules contra-r2, severity=candidate)
 candidate date: 2026-03-01 vs 2026-03-15
-  ev_cdf6cdbd640640e7 vs ev_db9e267dc4e74674  (rules contra-r2, severity=candidate)
+  ev_3e30169bca2d41d5 vs ev_e0a9da70ca664297  (rules contra-r2, severity=candidate)
 candidates require analyst review — they are never silently treated as findings
 
 === 8. analyst reviews the three supporting relations -> confirmed ===
-relation rel_e7b315bf7dc04a1f → confirmed
-relation rel_883089b4ec0f479b → confirmed
-relation rel_c9c35ca2504043d8 → confirmed
+relation rel_8200ef388b2b405e → confirmed
+relation rel_403399e392c54fd5 → confirmed
+relation rel_40c36a5786e34e8b → confirmed
 --- assessment BEFORE confirming the contradiction (reproducible twice) ---
-claim clm_35d9f321f32d4a68
+claim clm_0ed2d10d4c2c42e6
   outcome:   SUPPORTED_BUT_UNCONFIRMED
   rules:     assess-r2
   provenance:complete
@@ -89,7 +89,7 @@ overstated (copies, syndication, or common sourcing).
 independent.
   caveat: Missing data is not evidence of absence. These labels are workflow states with documented 
 criteria, not probabilities of truth.
-claim clm_35d9f321f32d4a68
+claim clm_0ed2d10d4c2c42e6
   outcome:   SUPPORTED_BUT_UNCONFIRMED
   rules:     assess-r2
   provenance:complete
@@ -103,8 +103,8 @@ independent.
   caveat: Missing data is not evidence of absence. These labels are workflow states with documented 
 criteria, not probabilities of truth.
 --- confirm the contradiction -> CONTESTED, then set it back to unreviewed ---
-relation rel_73e56efadbbe484e → confirmed
-claim clm_35d9f321f32d4a68
+relation rel_1f9c19d4c8db41c3 → confirmed
+claim clm_0ed2d10d4c2c42e6
   outcome:   CONTESTED
   rules:     assess-r2
   provenance:complete
@@ -115,37 +115,37 @@ claim clm_35d9f321f32d4a68
 the conflict.
   caveat: Missing data is not evidence of absence. These labels are workflow states with documented 
 criteria, not probabilities of truth.
-relation rel_73e56efadbbe484e → unreviewed
+relation rel_1f9c19d4c8db41c3 → unreviewed
 
 === 9. hash-chained analysis events verify ===
-2026-10-19T21:14:03Z  source.add  f06a6e559ba7…
-2026-10-19T21:14:03Z  source.add  f7f80cab0066…
-2026-10-19T21:14:04Z  source.add  0042b82283a4…
-2026-10-19T21:14:04Z  source.add  35847ac88bf9…
-2026-10-19T21:14:04Z  evidence.attach  ec3a7d2d0289…
-2026-10-19T21:14:04Z  evidence.attach  fe0457ce68fa…
-2026-10-19T21:14:05Z  evidence.attach  ef5b372978ec…
-2026-10-19T21:14:05Z  evidence.attach  b2918e76de14…
-2026-10-19T21:14:05Z  evidence.attach  0239c22be963…
-2026-10-19T21:14:05Z  evidence.attach  b66e4e9ced18…
-2026-10-19T21:14:05Z  observation.add  e951d0df4bec…
-2026-10-19T21:14:06Z  relation.add  bccb85fc1df7…
-2026-10-19T21:14:06Z  relation.add  fe72c41728ed…
-2026-10-19T21:14:06Z  relation.add  ccf463ca4ce3…
-2026-10-19T21:14:07Z  relation.add  7efe0796a7c8…
-2026-10-19T21:14:07Z  analyze.origins  326fdcb268d5…
+2026-10-19T21:54:20Z  source.add  cca55e457c24…
+2026-10-19T21:54:20Z  source.add  c7b3b5694a13…
+2026-10-19T21:54:20Z  source.add  71298f4b42f1…
+2026-10-19T21:54:21Z  source.add  a611b80707f9…
+2026-10-19T21:54:21Z  evidence.attach  0acfd330b024…
+2026-10-19T21:54:21Z  evidence.attach  f06e36342b34…
+2026-10-19T21:54:22Z  evidence.attach  0f87144de182…
+2026-10-19T21:54:22Z  evidence.attach  fdff807ad03e…
+2026-10-19T21:54:22Z  evidence.attach  d788def2ab9d…
+2026-10-19T21:54:23Z  evidence.attach  2f9eb621439e…
+2026-10-19T21:54:23Z  observation.add  bf50c0582495…
+2026-10-19T21:54:24Z  relation.add  b4363c5f9650…
+2026-10-19T21:54:24Z  relation.add  0ccb94ed3ea1…
+2026-10-19T21:54:24Z  relation.add  51fc1e206882…
+2026-10-19T21:54:25Z  relation.add  811b1f93fccc…
+2026-10-19T21:54:25Z  analyze.origins  5ae772e9e410…
 chain: VERIFIED — ok (16 events)
 tamper-evident within this store's threat model; not a blockchain — a privileged operator rewriting 
 every row can defeat it
 
-=== 10. report (Markdown) — links, IDs, digests, rule versions, caveats ===
+=== 10. report (Markdown + HTML) — links, IDs, digests, rule versions, caveats ===
 # Case Report — SYNTHETIC-demo-acme-breach
 
-- **Case ID:** `case_792ff819ed184ac6`
+- **Case ID:** `case_9f434af5a8984217`
 - **Status:** open
 - **Purpose:** SYNTHETIC demonstration of the provenance workflow
 - **Scope:** local synthetic fixtures only; no real persons
-- **Created:** 2026-10-19T21:14:03Z
+- **Created:** 2026-10-19T21:54:19Z
 - **Records:** 6 sources, 1 claims, 6 evidence, 4 relations
 - **Report schema:** v1
 
@@ -161,93 +161,93 @@ every row can defeat it
 
 ## Sources
 
-### `src_a8ef77176f9449fb`
+### `src_6ac532c5ac98450b`
 - Locator: https://mirror-one.example/news/acme-breach
 - Type: web_page via manual
-- First seen: 2026-10-19T21:14:03Z
+- First seen: 2026-10-19T21:54:20Z
 - Limitations: Acme Corp said on Monday that an internal review found unauthorized access to a customer records database. The company stated that the incident was discovered on 2026-03-01 after an alert from its monitoring provider, and that notification of affected customers began within 48 hours. No payment card data was stored in the affected system according to the statement published on the corporate website.
 
-### `src_2a97fd0f58ac4606`
+### `src_823e3761bba64f4f`
 - Locator: https://mirror-two.example/feeds/2026/acme-breach-remix
 - Type: web_page via manual
-- First seen: 2026-10-19T21:14:03Z
+- First seen: 2026-10-19T21:54:20Z
 - Limitations: LEAD KICKER: same story as it crossed the wire. Acme Corp said on Monday that an internal review found unauthorized access to a customer records database. The company stated that the incident was discovered on 2026-03-01 after an alert from its monitoring provider, and that notification of affected customers began within 48 hours. No payment card data was stored in the affected system according to the statement published on the corporate website.
 
-### `src_796ac78d9ae148ff`
+### `src_1f7b42fe45ca47d2`
 - Locator: https://wire-service.example/exclusive/acme-regulator-inquiry
 - Type: web_page via manual
-- First seen: 2026-10-19T21:14:04Z
+- First seen: 2026-10-19T21:54:20Z
 - Limitations: Regulators opened a separate inquiry into Acme Corp data-handling practices this week, according to a spokesperson for the authority. The inquiry is described as routine and unrelated to any specific incident at the company.
 
-### `src_626f9a894d9e4569`
+### `src_1de3a7228b304990`
 - Locator: https://outlet.example/timeline/acme-intrusion-dates
 - Type: web_page via manual
-- First seen: 2026-10-19T21:14:04Z
+- First seen: 2026-10-19T21:54:21Z
 - Limitations: A timeline compiled by the outlets own review places the first discovery of the Acme Corp intrusion at 2026-03-15, contradicting the earlier corporate statement. The discrepancy remains unexplained in public filings.
 
-### `src_152c97faa4934f99`
-- Locator: /tmp/tracefield-demo.3asm0W/fixtures/device-metadata.json
+### `src_a4c4fc9b6af44fc3`
+- Locator: /tmp/tracefield-demo.cXhlcx/fixtures/device-metadata.json
 - Type: local_file via provided
-- First seen: 2026-10-19T21:14:05Z
+- First seen: 2026-10-19T21:54:22Z
 
-### `src_d9906baa53c54ca4`
-- Locator: /tmp/tracefield-demo.3asm0W/fixtures/fixture.png
+### `src_f4a0d794cdb74832`
+- Locator: /tmp/tracefield-demo.cXhlcx/fixtures/fixture.png
 - Type: local_file via provided
-- First seen: 2026-10-19T21:14:05Z
+- First seen: 2026-10-19T21:54:23Z
 
 ## Evidence
 
-### `ev_c79d7fbe46924fda`
+### `ev_cc6bfc2fbdb44688`
 - SHA-256: `e2cf11448b228b812a223760befb8190eb5a34f10a39118dcb572cfca7f4aecc`
 - Media type: text/plain
 - Size: 402 bytes
-- Source: `src_a8ef77176f9449fb`
-- Captured: 2026-10-19T21:14:04Z
+- Source: `src_6ac532c5ac98450b`
+- Captured: 2026-10-19T21:54:21Z
 - Storage: `evidence/e2/e2cf11448b228b812a223760befb8190eb5a34f10a39118dcb572cfca7f4aecc`
 
-### `ev_cdf6cdbd640640e7`
+### `ev_3e30169bca2d41d5`
 - SHA-256: `e2cf11448b228b812a223760befb8190eb5a34f10a39118dcb572cfca7f4aecc`
 - Media type: text/plain
 - Size: 402 bytes
-- Source: `src_2a97fd0f58ac4606`
-- Captured: 2026-10-19T21:14:04Z
+- Source: `src_823e3761bba64f4f`
+- Captured: 2026-10-19T21:54:21Z
 - Storage: `evidence/e2/e2cf11448b228b812a223760befb8190eb5a34f10a39118dcb572cfca7f4aecc`
 
-### `ev_496b692e371e4dc2`
+### `ev_843622dda4c540c3`
 - SHA-256: `ed4fdaa3bbed6e75bede3009fd8fe5704c5fb97c17a36998c51aa307134b3e31`
 - Media type: text/plain
 - Size: 224 bytes
-- Source: `src_796ac78d9ae148ff`
-- Captured: 2026-10-19T21:14:05Z
+- Source: `src_1f7b42fe45ca47d2`
+- Captured: 2026-10-19T21:54:22Z
 - Storage: `evidence/ed/ed4fdaa3bbed6e75bede3009fd8fe5704c5fb97c17a36998c51aa307134b3e31`
 
-### `ev_db9e267dc4e74674`
+### `ev_e0a9da70ca664297`
 - SHA-256: `3c1e8301e13448c167b7ea0e79ebf25fc3003a7cc4b61fa3aba5e4e099dcf554`
 - Media type: text/plain
 - Size: 216 bytes
-- Source: `src_626f9a894d9e4569`
-- Captured: 2026-10-19T21:14:05Z
+- Source: `src_1de3a7228b304990`
+- Captured: 2026-10-19T21:54:22Z
 - Storage: `evidence/3c/3c1e8301e13448c167b7ea0e79ebf25fc3003a7cc4b61fa3aba5e4e099dcf554`
 
-### `ev_818165775748416c`
+### `ev_9d8eab289905437a`
 - SHA-256: `534760307eb1bd4fa2dc19056088b90903f186a763434e9aa95e19febaba048b`
 - Media type: application/json
 - Size: 246 bytes
-- Source: `src_152c97faa4934f99`
-- Captured: 2026-10-19T21:14:05Z
+- Source: `src_a4c4fc9b6af44fc3`
+- Captured: 2026-10-19T21:54:22Z
 - Storage: `evidence/53/534760307eb1bd4fa2dc19056088b90903f186a763434e9aa95e19febaba048b`
 
-### `ev_8cba354504de476c`
+### `ev_8576eb1d3dfe4b75`
 - SHA-256: `b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640`
 - Media type: image/png
 - Size: 69 bytes
-- Source: `src_d9906baa53c54ca4`
-- Captured: 2026-10-19T21:14:05Z
+- Source: `src_f4a0d794cdb74832`
+- Captured: 2026-10-19T21:54:23Z
 - Storage: `evidence/b1/b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640`
 
 ## Claims and Assessments
 
-### `clm_35d9f321f32d4a68`
+### `clm_0ed2d10d4c2c42e6`
 > The Acme Corp breach was discovered on 2026-03-01.
 
 - Status: active / review: unreviewed
@@ -260,28 +260,31 @@ every row can defeat it
 
 ## Relations
 
-- `rel_e7b315bf7dc04a1f` src_a8ef77176f9449fb —[supports/confirmed]→ clm_35d9f321f32d4a68
+- `rel_8200ef388b2b405e` src_6ac532c5ac98450b —[supports/confirmed]→ clm_0ed2d10d4c2c42e6
   - rationale: wire copy text carries the discovery date
-- `rel_883089b4ec0f479b` src_2a97fd0f58ac4606 —[corroborates/confirmed]→ clm_35d9f321f32d4a68
+- `rel_403399e392c54fd5` src_823e3761bba64f4f —[corroborates/confirmed]→ clm_0ed2d10d4c2c42e6
   - rationale: syndicated copy of the same wire story
-- `rel_c9c35ca2504043d8` src_796ac78d9ae148ff —[supports/confirmed]→ clm_35d9f321f32d4a68
+- `rel_40c36a5786e34e8b` src_1f7b42fe45ca47d2 —[supports/confirmed]→ clm_0ed2d10d4c2c42e6
   - rationale: distinct reporting consistent with the claim
-- `rel_73e56efadbbe484e` src_626f9a894d9e4569 —[contradicts/unreviewed]→ clm_35d9f321f32d4a68
+- `rel_1f9c19d4c8db41c3` src_1de3a7228b304990 —[contradicts/unreviewed]→ clm_0ed2d10d4c2c42e6
   - rationale: contrary timeline places discovery on 2026-03-15
 
 ## Origin Clusters (hypotheses)
 
-### `ocl_b5755527b33443b8` — unreviewed
-- Members: src_2a97fd0f58ac4606, src_a8ef77176f9449fb
+### `ocl_c67ddcf2670f4719` — unreviewed
+- Members: src_6ac532c5ac98450b, src_823e3761bba64f4f
 - Algorithm: origin-r3
-- Indicator: src_a8ef77176f9449fb~src_2a97fd0f58ac4606: near_duplicate_text>=0.8 (0.857)
+- Indicator: src_6ac532c5ac98450b~src_823e3761bba64f4f: near_duplicate_text>=0.8 (0.857)
 
 ---
 
 _Generated by TRACEFIELD. Assessment labels are workflow states, not guarantees of factual correctness._
 
+wrote /tmp/tracefield-demo.cXhlcx/report.html
+--- HTML report written to /tmp/tracefield-demo.cXhlcx/report.html (self-contained, no external resources) ---
+
 === 11. privacy-aware export: SENSITIVE_METADATA lists keys, never values ===
-exported case case_792ff819ed184ac6 → /tmp/tracefield-demo.3asm0W/export
+exported case case_9f434af5a8984217 → /tmp/tracefield-demo.cXhlcx/export
 note: deleting the active database does not erase this export or any other copies you have made
 --- SENSITIVE_METADATA.txt (advisory; coordinate VALUES are not copied) ---
 TRACEFIELD export — sensitive metadata advisory
@@ -307,4 +310,4 @@ case-verify exit code after tamper: 1 (1 = detected, as designed)
 
 === DEMO COMPLETE — synthetic case only; no real data was used ===
 
-Script done on 2026-10-20 00:14:11+03:00 [COMMAND_EXIT_CODE="0"]
+Script done on 2026-10-20 00:54:31+03:00 [COMMAND_EXIT_CODE="0"]

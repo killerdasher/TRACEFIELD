@@ -6,6 +6,7 @@ times. Caveats travel with the conclusions — exports must not strip them.
 
 from __future__ import annotations
 
+import html
 import json
 from typing import Any
 
@@ -182,10 +183,141 @@ def render_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _h(value: object) -> str:
+    """HTML-escape any untrusted value for safe embedding."""
+    return html.escape(str(value), quote=True)
+
+
+def render_html(payload: dict[str, Any]) -> str:
+    """Self-contained HTML report. No external resources, no JavaScript.
+
+    Every string from case data is HTML-escaped — source text, claim text,
+    and limitations are attacker-controllable in the general case, so a
+    report opened in a browser must not execute injected markup. Locators
+    are rendered as plain escaped text, never as hrefs, so ``javascript:``
+    URLs cannot become clickable links.
+    """
+    case = payload["case"]
+    counts = payload["counts"]
+    assessments = {a["claim_id"]: a for a in payload["assessments"]}
+    out: list[str] = []
+    out.append("<!DOCTYPE html>")
+    out.append('<html lang="en"><head><meta charset="utf-8">')
+    out.append(f"<title>Case Report — {_h(case['title'])}</title>")
+    out.append(
+        "<style>"
+        "body{font-family:system-ui,sans-serif;max-width:60rem;margin:2rem auto;"
+        "padding:0 1rem;line-height:1.5;color:#111}"
+        "code{background:#f2f2f2;padding:0 .25em}"
+        "blockquote{border-left:3px solid #bbb;margin-left:0;padding-left:1em;color:#333}"
+        ".caveat{background:#fff8e1;border:1px solid #e0c060;padding:.5em 1em;margin:.5em 0}"
+        "h2{border-bottom:1px solid #ddd;padding-bottom:.2em}"
+        ".footer{margin-top:3rem;font-size:.9em;color:#555;border-top:1px solid #ddd;padding-top:1em}"
+        "</style></head><body>"
+    )
+    out.append(f"<h1>Case Report — {_h(case['title'])}</h1>")
+    out.append("<ul>")
+    out.append(f"<li><b>Case ID:</b> <code>{_h(case['id'])}</code></li>")
+    out.append(f"<li><b>Status:</b> {_h(case['status'])}</li>")
+    out.append(f"<li><b>Purpose:</b> {_h(case['purpose'] or '(none declared)')}</li>")
+    out.append(f"<li><b>Scope:</b> {_h(case['scope'] or '(none declared)')}</li>")
+    out.append(f"<li><b>Created:</b> {_h(case['created_at'])}</li>")
+    out.append(
+        f"<li><b>Records:</b> {counts['sources']} sources, {counts['claims']} claims, "
+        f"{counts['evidence']} evidence, {counts['relations']} relations</li>"
+    )
+    out.append(f"<li><b>Report schema:</b> v{_h(payload['report_schema_version'])}</li>")
+    out.append("</ul>")
+
+    out.append("<h2>Caveats</h2>")
+    for c in payload["global_caveats"]:
+        out.append(f'<p class="caveat">{_h(c)}</p>')
+
+    out.append("<h2>Sources</h2>")
+    if not payload["sources"]:
+        out.append("<p><i>No sources recorded.</i></p>")
+    for s in payload["sources"]:
+        out.append(f"<h3><code>{_h(s['id'])}</code></h3><ul>")
+        out.append(f"<li>Locator: {_h(s['locator'])}</li>")
+        out.append(f"<li>Type: {_h(s['source_type'])} via {_h(s['access_method'])}</li>")
+        out.append(f"<li>First seen: {_h(s['first_seen_at'])}</li>")
+        if s["collected_at"]:
+            out.append(f"<li>Collected: {_h(s['collected_at'])}</li>")
+        if s["published_at"]:
+            out.append(f"<li>Published: {_h(s['published_at'])}</li>")
+        if s["limitations"]:
+            out.append(f"<li>Limitations: {_h(s['limitations'])}</li>")
+        out.append("</ul>")
+
+    out.append("<h2>Evidence</h2>")
+    if not payload["evidence"]:
+        out.append("<p><i>No evidence attached.</i></p>")
+    for e in payload["evidence"]:
+        out.append(f"<h3><code>{_h(e['id'])}</code></h3><ul>")
+        out.append(f"<li>SHA-256: <code>{_h(e['sha256'])}</code></li>")
+        out.append(f"<li>Media type: {_h(e['media_type'])}</li>")
+        out.append(f"<li>Size: {_h(e['size_bytes'])} bytes</li>")
+        out.append(f"<li>Source: <code>{_h(e['source_id'])}</code></li>")
+        out.append(f"<li>Captured: {_h(e['captured_at'])}</li>")
+        out.append(f"<li>Storage: <code>{_h(e['storage_ref'])}</code></li>")
+        out.append("</ul>")
+
+    out.append("<h2>Claims and Assessments</h2>")
+    if not payload["claims"]:
+        out.append("<p><i>No claims recorded.</i></p>")
+    for c in payload["claims"]:
+        out.append(f"<h3><code>{_h(c['id'])}</code></h3>")
+        out.append(f"<blockquote>{_h(c['text'])}</blockquote>")
+        out.append(f"<p>Status: {_h(c['status'])} / review: {_h(c['review_state'])}</p>")
+        a = assessments.get(c["id"])
+        if a:
+            out.append(
+                f"<p><b>Assessment:</b> <code>{_h(a['outcome'])}</code> "
+                f"(rules {_h(a['rule_version'])})</p>"
+            )
+            out.append(
+                f"<p>Supporting relations: {_h(a['supporting_count'])}; "
+                f"contradicting: {_h(a['contradicting_count'])}</p>"
+            )
+            out.append(f"<p>Independence: {_h(a['independence'])}</p>")
+            for caveat in a["caveats"]:
+                out.append(f'<p class="caveat">Caveat: {_h(caveat)}</p>')
+
+    if payload["relations"]:
+        out.append("<h2>Relations</h2><ul>")
+        for r in payload["relations"]:
+            out.append(
+                f"<li><code>{_h(r['id'])}</code> {_h(r['from_id'])} —"
+                f"[{_h(r['relation'])}/{_h(r['review_state'])}]→ {_h(r['to_id'])}</li>"
+            )
+            if r["rationale"]:
+                out.append(f"<ul><li>rationale: {_h(r['rationale'])}</li></ul>")
+        out.append("</ul>")
+
+    if payload["origin_clusters"]:
+        out.append("<h2>Origin Clusters (hypotheses)</h2>")
+        for c in payload["origin_clusters"]:
+            out.append(f"<h3><code>{_h(c['id'])}</code> — {_h(c['review_state'])}</h3><ul>")
+            out.append(f"<li>Members: {_h(', '.join(c['member_ids']))}</li>")
+            out.append(f"<li>Algorithm: {_h(c['algorithm_version'])}</li>")
+            for ind in c["indicators"]:
+                out.append(f"<li>Indicator: {_h(ind)}</li>")
+            out.append("</ul>")
+
+    out.append(
+        '<p class="footer">Generated by TRACEFIELD. Assessment labels are '
+        "workflow states, not guarantees of factual correctness.</p>"
+    )
+    out.append("</body></html>")
+    return "\n".join(out) + "\n"
+
+
 def build_report(settings: Settings, db: Database, case: Case, *, fmt: str) -> str:
     payload = build_case_payload(settings, db, case)
     if fmt == "json":
         return json.dumps(payload, indent=2, sort_keys=True)
     if fmt == "markdown":
         return render_markdown(payload)
-    raise ValueError(f"unsupported report format: {fmt} (use markdown or json)")
+    if fmt == "html":
+        return render_html(payload)
+    raise ValueError(f"unsupported report format: {fmt} (use markdown, json, or html)")

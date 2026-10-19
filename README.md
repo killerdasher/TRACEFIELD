@@ -102,7 +102,7 @@ manifest OK — N files re-hashed, all intact
 | Claims, relations, analyst review, `analyze claim` | **implemented** | Decision table pinned by tests; `RULE_VERSION` recorded |
 | Origin clustering (containment r3) | **implemented** | Ordered k=3/4/5 shingles; advisory `related_text` edges |
 | Contradiction candidates (dates/digests/quantities) | **implemented** | Always severity `candidate`; requires review |
-| Reports (Markdown/JSON) with caveats + versions | **implemented** | |
+| Reports (Markdown/JSON/HTML) with caveats + versions | **implemented** | HTML is self-contained, fully escaped, no external resources |
 | `hash` / `inspect [--deep]` / `ocr` | **implemented** | Backends optional; UNAVAILABLE is honest |
 | `fetch --fetch` (SSRF-guarded) / `username check` | **implemented** | Opt-in; soft-404 markers; 1 req/s; no bulk mode |
 | Tool catalogue + tiered `tools status` | **implemented** | 2,264 inert records; counts never padded |
