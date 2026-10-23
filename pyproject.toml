@@ -52,6 +52,13 @@ Issues = "https://github.com/killerdasher/TRACEFIELD/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracefield"]
 
+# G7/FS-01: the inert catalogue ships INSIDE the wheel so a fresh install
+# can resolve `tracefield/data/catalog/tools.jsonl` package-relative
+# (FS-02). The path resolver already prefers the package layout and falls
+# back to the repo layout for source checkouts.
+[tool.hatch.build.targets.wheel.force-include]
+"data/catalog" = "tracefield/data/catalog"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"

@@ -192,9 +192,62 @@ class TestReportAndExport:
     def test_json_report_valid_and_versioned(self, settings, db, case_factory) -> None:
         case, _ = self._seed(settings, db, case_factory)
         payload = json.loads(build_report(settings, db, case, fmt="json"))
-        assert payload["report_schema_version"] == 1
+        assert payload["report_schema_version"] == 2
         assert payload["case"]["id"] == case.id
         assert payload["global_caveats"]
+        # Dissemination block (OOVS-09): generated_at, tool, author/revision/
+        # corrections always present; an unset author is stated honestly.
+        assert payload["generated_at"].endswith("Z")  # tz-aware UTC
+        assert payload["tool"]["name"] == "tracefield"
+        assert payload["document"]["author"] == "author not set"
+        assert payload["document"]["revision"] == 1
+        assert payload["document"]["corrections"] == []
+
+    def test_report_carries_configured_author(self, settings, db, case_factory) -> None:
+        """A configured author identity is carried into all formats."""
+        case, _ = self._seed(settings, db, case_factory)
+        settings.report_author = "Test Operator <op@example.org>"
+        payload = json.loads(build_report(settings, db, case, fmt="json"))
+        assert payload["document"]["author"] == "Test Operator <op@example.org>"
+        md = build_report(settings, db, case, fmt="markdown")
+        assert "Test Operator <op@example.org>" in md
+        html_out = build_report(settings, db, case, fmt="html")
+        assert "Test Operator &lt;op@example.org&gt;" in html_out  # escaped
+
+    def test_report_reflects_current_state_after_claim_correction(
+        self, settings, db, case_factory
+    ) -> None:
+        """Correction-propagation invariant: reports are derived on demand
+        from current case state — there is no cached derived artefact, so a
+        corrected claim propagates into the next report by construction.
+        The report carries a `corrections` audit list; empty here because
+        this correction path predates correction records."""
+
+        case, _ = self._seed(settings, db, case_factory)
+        claims = ClaimRepo(db).list_for_case(case.id)
+        claim = claims[0]
+        before = build_report(settings, db, case, fmt="markdown")
+        assert claim.text in before
+
+        # Correct the claim text directly at the storage layer (a claim
+        # edit is a first-class record mutation, not a new cached report).
+        db.execute("UPDATE claims SET text=? WHERE id=?", ("CORRECTED claim text", claim.id))
+        after = build_report(settings, db, case, fmt="markdown")
+        assert "CORRECTED claim text" in after
+        assert claim.text not in after  # stale text no longer rendered
+
+    def test_timestamps_are_utc_aware(self, settings, db, case_factory) -> None:
+        """Temporal-evidence invariant: every stored/generated timestamp is
+        timezone-aware UTC — naive timestamps would silently corrupt any
+        later temporal comparison or replay."""
+        case, _ = self._seed(settings, db, case_factory)
+        payload = json.loads(build_report(settings, db, case, fmt="json"))
+        for s in payload["sources"]:
+            assert s["first_seen_at"].endswith("Z")
+            if s["collected_at"]:
+                assert s["collected_at"].endswith("Z")
+        assert payload["generated_at"].endswith("Z")
+        assert case.created_at.endswith("Z")
 
     def test_export_and_verify_manifest(self, settings, db, case_factory) -> None:
         case, ws = self._seed(settings, db, case_factory)

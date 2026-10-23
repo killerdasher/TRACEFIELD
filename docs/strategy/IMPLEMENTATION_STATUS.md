@@ -1,11 +1,12 @@
 # TRACEFIELD — Implementation Status
 
-> Honest status snapshot, 2026-10-16, for v0.1.0 (pre-first-commit). Every
-> number below was measured on this machine (`pytest --collect-only`,
-> `ruff check`, `mypy src`, `tracefield catalog validate`, `wc -l`). Nothing in
-> this document is aspirational; planned work is listed as planned.
+> Honest status snapshot, **2026-10-19 (post-build audit)**, for v0.1.0 at
+> commit `e964409` (4 commits on `main`). Every number below was measured on
+> this machine (`pytest`, `ruff check`, `mypy src`, `tracefield catalog
+> validate`, wheel install test). Nothing in this document is aspirational;
+> planned work is listed as planned. Full findings: `POST_BUILD_AUDIT.md`.
 
-## Verification gates (all green at last run)
+## Verification gates (state at 2026-10-19 audit)
 
 | Gate | Result |
 |---|---|
@@ -14,13 +15,24 @@
 | `ruff format --check src tests` | **clean** (49 files) |
 | `mypy src` (strict) | **clean**, 34 files |
 | `tracefield catalog validate` | **catalogue OK — 2264 records valid** |
-| CI workflow | `.github/workflows/ci.yml`: ruff, mypy, pytest × {3.11, 3.12, 3.13}, catalogue validate, `pip-audit --strict` |
+| `pip-audit --strict` (requirements minus editable self-line) | **clean** |
+| **Fresh-venv wheel install** | **FAIL** — `data/` not packaged; `tools status` exits 2 with "catalogue data not found" (audit G7; debt #5 promoted to P0) |
+| CI workflow | `.github/workflows/ci.yml`: ruff, mypy, pytest × {3.11, 3.12, 3.13}, catalogue validate, `pip-audit --strict`; green on `e964409` (not re-run this phase — no pushes) |
 
 Test counts were measured on 2026-10-19 (marker breakdown via
 `pytest -m <marker>`); every test file carries a strict marker.
 
 Network-marked tests never run in CI (marker exists, zero tests currently use
 it — live-network behaviour is exercised manually and via fixtures).
+
+> **Update (2026-10-23, Phases 6–7).** The rows above are the 2026-10-19
+> audit snapshot. Since then: `pytest` is **292 passed**, `mypy` covers **38
+> files**, and the one FAIL row — **fresh-venv wheel install (audit G7)** — is
+> **FIXED**: `data/catalog` ships inside the wheel and resolves
+> package-relative, so `tools status/search/show` + `catalog validate` all
+> exit 0 in a clean venv (`PHASE_07_REPORT_TESTING.md`). TUI truthfulness
+> fixed in `PHASE_06_REPORT_TUI.md`. Nothing above was rewritten — it records
+> what was true at audit time.
 
 ## Codebase size (measured)
 
@@ -34,10 +46,13 @@ it — live-network behaviour is exercised manually and via fixtures).
 | Strategy docs | 5 (+ 4 review streams) | — |
 | Community/CI docs | CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, CHANGELOG, CI workflow, 4 issue templates + PR template | — |
 | OOVS mapping | `docs/oovs/OOVS_MAPPING.md` | — |
-| Synthetic demo | `docs/demo/run_synthetic_demo.sh` + recorded session `DEMO_SESSION.txt` (captured 2026-10-20 on this machine) | — |
+| Synthetic demo | `docs/demo/run_synthetic_demo.sh` + recorded session `DEMO_SESSION.txt` (captured 2026-10-19 UTC, header reads 2026-10-20 because the machine clock is +03:00 — timezone artifact, not a date claim) | — |
+| Post-build audit | `docs/strategy/POST_BUILD_AUDIT.md` + `TUI_INTERACTION_SPEC.md` (2026-10-19) | — |
 
-Git state: **no commits yet** (greenfield, single `main` branch, all files
-untracked). First commit lands at the end of this build phase.
+Git state: **4 commits on `main`** (`fd6eec4` initial build, `86a67cc` path
+scrub + GitHub hardening, `cabcfa8` dependency/report fixes, `e964409` HTML
+report), tracking `origin/main`, working tree clean. GitHub repo public with
+secret scanning, push protection, Dependabot, CodeQL; CI green on `e964409`.
 
 ## Catalogue (tiered counts, from `tracefield tools status`)
 
@@ -102,16 +117,32 @@ on shutdown.
 2. Relation endpoint validation is app-level only; no DB-level FK on
    `from_id`/`to_id` (RISK A1/R-A1-5).
 3. Report lacks author identity and a corrections section (RISK C1/R-C1-2).
-4. Event digest does not yet include `occurred_at`/`tool_fingerprint`
-   (deferred to schema v2 to avoid breaking existing chains).
-5. Catalogue path resolution is repo-relative with a clear failure message;
-   wheel packaging of `data/` not yet exercised (AC-A1-6 still open).
+4. Event digest does not yet include `tool_fingerprint`
+   (`occurred_at` **is** included — `core/provenance.py`; the earlier claim
+   that it was missing was stale). Deferred to schema v2 to avoid breaking
+   existing chains.
+5. ~~**P0 (confirmed):** wheel packaging of `data/` is broken~~ — **RESOLVED
+   (Phase 7).** The wheel target now force-includes `data/catalog` inside the
+   package, and the catalogue resolves package-relative (repo fallback intact);
+   fresh-venv `tools status/search/show` + `catalog validate` all exit 0
+   (audit gate G7 closed; `PHASE_07_REPORT_TESTING.md`).
 6. No health-check job for catalogue rows (`last_checked` schema-only).
 7. No perceptual hashing for image duplicate analysis.
-8. TUI has no case selector (views scoped to first case with indicator) and
-   no async worker offload for repo queries.
+8. ~~TUI has no case selector; no async worker offload~~ — **RESOLVED (Phase
+   6).** Active-case model + `c` case picker shipped; case-scoped views render
+   one case only; cooperative `Ctrl+C` cancel with real-count milestones.
+   Docstring/keymap mismatches and false data labelling remediated
+   (`PHASE_06_REPORT_TUI.md`; audit T1–T10 closed).
 9. Malformed User-Agent string in `fetch.py` (cosmetic; needs real contact
    URL before public release).
+10. Redirect hops in `fetch.py` are policy-validated but not IP-pinned
+    (validate-then-connect window on hop 2+; first hop is pinned) — audit F1.
+11. `run_backend` docstring claims an allowlist that the code does not enforce
+    (only `shutil.which`; call sites are all literal today) — audit F2.
+12. `migrate()` silently accepts a newer-schema DB (empty upgrade range
+    instead of refusing) — audit F3.
+13. Fault-tolerance coverage gaps: SQLite busy/corrupt/full/write-permission,
+    export interruption, cancellation semantics untested — audit §6.
 
 ## Explicit non-claims
 

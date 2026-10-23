@@ -498,6 +498,22 @@ class EventRepo:
         ).fetchone()
         return r["digest"] if r else ""
 
+    def get(self, event_id: str) -> AnalysisEvent | None:
+        r = self.db.execute("SELECT * FROM analysis_events WHERE id=?", (event_id,)).fetchone()
+        if r is None:
+            return None
+        return AnalysisEvent(
+            id=r["id"],
+            case_id=r["case_id"],
+            action=r["action"],
+            inputs=json.loads(r["inputs"]),
+            outputs=json.loads(r["outputs"]),
+            tool_fingerprint=r["tool_fingerprint"],
+            prev_digest=r["prev_digest"],
+            digest=r["digest"],
+            occurred_at=r["occurred_at"],
+        )
+
     def list_for_case(self, case_id: str) -> list[AnalysisEvent]:
         rows = self.db.execute(
             "SELECT * FROM analysis_events WHERE case_id=? ORDER BY rowid",

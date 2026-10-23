@@ -43,10 +43,19 @@ class Settings:
     config_path: Path = field(default_factory=default_config_path)
     allow_network: bool = False  # network fetches are opt-in
     username_check_enabled: bool = False  # public-profile checks are opt-in
+    # Typed adapter boundary (decision D19). Local-only by default; the
+    # kill switch exists so a misbehaving backend can be disabled without
+    # uninstalling anything.
+    adapters_enabled: bool = True
     max_fetch_bytes: int = 10 * 1024 * 1024
     max_fetch_timeout_s: float = 15.0
     max_redirects: int = 5
     redact_exports: bool = True
+    # Dissemination identity for reports (OOVS-09). Sourced from the
+    # TRACEFIELD_REPORT_AUTHOR environment variable; when unset the report
+    # states "author not set" rather than inventing one — an unattributed
+    # report is honest about being unattributed.
+    report_author: str = ""
 
     @property
     def db_path(self) -> Path:
@@ -74,4 +83,8 @@ def load_settings() -> Settings:
     s.allow_network = allow.strip().lower() in {"1", "true", "yes"}
     uname = os.environ.get("TRACEFIELD_USERNAME_CHECK", "")
     s.username_check_enabled = uname.strip().lower() in {"1", "true", "yes"}
+    adapters = os.environ.get("TRACEFIELD_ADAPTERS", "")
+    # Default ON (local-only backends); any explicit falsy value disables.
+    s.adapters_enabled = adapters.strip().lower() not in {"0", "false", "no", "off"}
+    s.report_author = os.environ.get("TRACEFIELD_REPORT_AUTHOR", "").strip()
     return s

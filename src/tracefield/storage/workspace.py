@@ -152,6 +152,29 @@ class CaseWorkspace:
             return False
         return hash_file(path) == ev.sha256
 
+    def store_raw_observation(
+        self, case_id: str, obs_id: str, data: bytes, *, suffix: str = ".txt"
+    ) -> str:
+        """Store a tool's raw (uninterpreted) return for an observation.
+
+        Private to the case (0o600), never executed, never parsed here —
+        the observation row references this file via ``raw_ref``. Returns
+        the case-relative reference.
+        """
+        validate_case_id(case_id)
+        if not re.fullmatch(r"obs_[0-9a-f]{16}", obs_id):
+            raise WorkspaceError("invalid observation id")
+        if suffix not in {".txt", ".json", ".log"}:
+            raise WorkspaceError("unsupported raw suffix")
+        d = self.case_dir(case_id) / "observations"
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / f"{obs_id}{suffix}"
+        tmp = dest.with_suffix(suffix + ".partial")
+        tmp.write_bytes(data)
+        tmp.chmod(0o600)
+        tmp.replace(dest)
+        return str(dest.relative_to(self.case_dir(case_id)))
+
     def _append_event(
         self, case_id: str, action: str, inputs: list[str], outputs: list[str]
     ) -> None:

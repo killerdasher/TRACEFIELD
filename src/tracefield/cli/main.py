@@ -8,6 +8,7 @@ strings are sanitized before terminal rendering; secrets are redacted.
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -39,7 +40,7 @@ from tracefield.core.domain import (
 )
 from tracefield.core.provenance import compute_event_digest
 from tracefield.security import sanitize_for_terminal
-from tracefield.storage import CaseWorkspace, Database
+from tracefield.storage import CaseWorkspace, Database, SchemaVersionError, StorageUnavailableError
 from tracefield.storage.repositories import (
     CaseRepo,
     ClaimRepo,
@@ -78,6 +79,9 @@ analyze_app = typer.Typer(help="Analysis engine.", no_args_is_help=True)
 tools_app = typer.Typer(help="Tool catalogue (inert metadata).", no_args_is_help=True)
 catalog_app = typer.Typer(help="Catalogue import/validation.", no_args_is_help=True)
 username_app = typer.Typer(help="Public username checks (opt-in network).", no_args_is_help=True)
+adapters_app = typer.Typer(
+    help="Typed adapter boundary (local backends, raw returns).", no_args_is_help=True
+)
 app.add_typer(case_app, name="case")
 app.add_typer(source_app, name="source")
 app.add_typer(claim_app, name="claim")
@@ -88,6 +92,7 @@ app.add_typer(analyze_app, name="analyze")
 app.add_typer(tools_app, name="tools")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(username_app, name="username")
+app.add_typer(adapters_app, name="adapters")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -130,7 +135,14 @@ def fail(message: str, code: int = EXIT_ERROR) -> NoReturn:
 
 def open_db(settings: Settings) -> Database:
     settings.ensure_dirs()
-    return Database(settings.db_path)
+    try:
+        return Database(settings.db_path)
+    except sqlite3.Error as exc:
+        # Locked / corrupt / otherwise-unopenable store: a storage problem,
+        # not a bug. Map to the documented "unavailable" exit code (5) so a
+        # concurrent-writer or damaged-DB condition is never reported as a
+        # generic failure (exit 1).
+        raise StorageUnavailableError(str(exc)) from exc
 
 
 def resolve_case(repo: CaseRepo, ref: str) -> Case:
@@ -289,8 +301,7 @@ def init_cmd(
     if settings.data_root.exists() and not force:
         console.print(f"already initialized: {settings.data_root}")
     else:
-        settings.ensure_dirs()
-        db = Database(settings.db_path)
+        db = open_db(settings)  # locked/corrupt store -> exit 5, consistent
         db.close()
         console.print(f"initialized: {settings.data_root}")
 
@@ -1181,9 +1192,9 @@ def analyze_events_cmd(
 
 
 def _default_catalog_path() -> Path:
-    import tracefield as _tf
+    from tracefield.registry.catalog import default_catalog_path
 
-    return Path(_tf.__file__).parent.parent.parent / "data" / "catalog" / "tools.jsonl"
+    return default_catalog_path()
 
 
 @tools_app.command("search")
@@ -1452,6 +1463,67 @@ def username_check(
 
 
 # ---------------------------------------------------------------------------
+# plan — deterministic, explainable mission planner (offline)
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def plan(
+    question: list[str] = typer.Argument(
+        ..., help="A bounded research question (quote it, or pass words)."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Propose deterministic investigation paths for a bounded question.
+
+    Offline and deterministic: no network, no model, no clock. The plan is a
+    proposal — TRACEFIELD executes nothing; you run each command yourself.
+    """
+    from tracefield.planner import build_plan
+
+    q = " ".join(question).strip()
+    if not q:
+        fail("question must not be empty", EXIT_USAGE)
+    payload = build_plan(q, catalog_path=_default_catalog_path())
+
+    def render(p: dict[str, Any]) -> None:
+        console.print(
+            f"[bold]plan[/bold] {s(p['planner_version'], 40)} — question: {s(p['question'], 200)}"
+        )
+        if p["unresolved_terms"]:
+            console.print(
+                f"[yellow]unresolved terms[/yellow]: {s(', '.join(p['unresolved_terms']), 200)}"
+            )
+        for path in p["paths"]:
+            c = path["criteria"]
+            console.print(
+                f"\n[bold]{s(path['id'], 40)}[/bold] "
+                f"(coverage {c['covered_terms']}, steps {c['step_count']}, "
+                f"network {c['network_steps']})"
+            )
+            console.print(f"  [dim]{s(path['rationale'], 200)}[/dim]")
+            for step in path["steps"]:
+                mark = (
+                    "[yellow]network[/yellow]" if step["needs_network"] else "[green]local[/green]"
+                )
+                console.print(f"  {mark} {s(step['goal'], 120)}")
+                console.print(f"    [dim]$ {s(step['command'], 200)}[/dim]")
+                console.print(f"    [dim]why: {s(step['why'], 200)}[/dim]")
+        cs = p["catalogue_suggestions"]
+        if cs["available"] and cs["suggestions"]:
+            console.print(f"\n[bold]catalogue suggestions[/bold] ({len(cs['suggestions'])})")
+            for sug in cs["suggestions"]:
+                console.print(
+                    f"  - {s(sug['id'], 40)} {s(sug['name'], 60)} "
+                    f"[dim]({s(sug['integration_state'], 20)})[/dim]"
+                )
+        for caveat in p["global_caveats"]:
+            console.print(f"[dim]> {s(caveat, 200)}[/dim]")
+
+    emit(payload, as_json, render)
+
+
+# ---------------------------------------------------------------------------
 # hash / inspect / ocr
 # ---------------------------------------------------------------------------
 
@@ -1615,16 +1687,156 @@ def case_delete(
 
 
 # ---------------------------------------------------------------------------
+# adapters — typed boundary over local backends (decision D19)
+# ---------------------------------------------------------------------------
+
+
+@adapters_app.command("list")
+def adapters_list(
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """List registered adapters with their factual health state.
+
+    'ready' means the backend answered a version probe right now. It is
+    not a claim about the backend's correctness or its upstream's health.
+    """
+    from tracefield.adapters import ADAPTERS, describe, health
+
+    payload = []
+    for spec in ADAPTERS.values():
+        row = describe(spec)
+        row["health"] = health(spec)
+        payload.append(row)
+
+    def render(items: list[dict[str, Any]]) -> None:
+        table = Table(title=f"adapters — {len(items)} registered")
+        table.add_column("id")
+        table.add_column("backend")
+        table.add_column("state")
+        table.add_column("integration")
+        table.add_column("health")
+        for row in items:
+            state = row["health"]["state"]
+            colour = {"ready": "green"}.get(state, "yellow")
+            table.add_row(
+                row["id"],
+                row["backend"],
+                f"[{colour}]{state}[/{colour}]",
+                row["integration_state"],
+                s(row["health"]["backend_version"] or row["health"]["note"], 40),
+            )
+        console.print(table)
+        console.print(
+            "[dim]ready = version probe answered now; 'indexed'/'integrated' "
+            "describe TRACEFIELD, never a third party's health[/dim]"
+        )
+
+    emit(payload, as_json, render)
+
+
+@adapters_app.command("run")
+def adapters_run(
+    adapter_id: str = typer.Argument(..., help="Registered adapter id."),
+    path: Path = typer.Argument(..., exists=True, readable=True, dir_okay=False),
+    case: str = typer.Option(..., "--case", help="Case ID or title."),
+    summary: str = typer.Option("", "--summary", help="Optional analyst note."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Run one registered adapter on a local file; store the raw return.
+
+    The tool's stdout is stored verbatim as an observation's raw payload
+    (case-private, 0600). Nothing is interpreted: an observation is a raw
+    return, not a finding.
+    """
+    from tracefield.adapters import AdapterError, get_adapter, run_adapter
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        # Validate the primary argument first: an unknown adapter id is a
+        # usage-level fact, independent of any case state.
+        try:
+            spec = get_adapter(adapter_id)
+        except AdapterError as exc:
+            fail(str(exc), EXIT_NOT_FOUND)
+        case_obj = resolve_case(CaseRepo(db), case)
+        try:
+            result = run_adapter(spec, path)
+        except AdapterError as exc:
+            # Missing backend / disabled adapters are "unavailable", not
+            # a usage error — the exit-code contract says so (5).
+            fail(str(exc), EXIT_UNAVAILABLE)
+
+        obs = Observation(
+            case_id=case_obj.id,
+            tool_name=f"adapter:{spec.id}",
+            tool_version=result.backend_version,
+            summary=s(summary, 500) or f"exit {result.exit_code}",
+        )
+        ws = CaseWorkspace(settings.cases_root, db)
+        raw = json.dumps(
+            {
+                "provenance": result.provenance(),
+                "exit_code": result.exit_code,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+            indent=2,
+        ).encode("utf-8")
+        obs.raw_ref = ws.store_raw_observation(case_obj.id, obs.id, raw, suffix=".json")
+        ObservationRepo(db).add(obs)
+        _append_event(ws, case_obj.id, "adapter.run", [spec.id], [obs.id])
+
+        def render(o: dict[str, Any]) -> None:
+            console.print(
+                f"[green]recorded[/green] observation [bold]{o['id']}"
+                f"[/bold] (raw stored at {s(o['raw_ref'], 200)})"
+            )
+            console.print(
+                f"  adapter: {s(o['tool_name'])}  backend version: {s(o['tool_version'], 60)}"
+            )
+            console.print(
+                "[dim]raw tool return, uninterpreted — review before any claim uses it[/dim]"
+            )
+
+        payload = obs.model_dump()
+        payload["exit_code"] = result.exit_code
+        emit(payload, as_json, render)
+        if result.exit_code != 0:
+            # The observation is recorded (the raw return IS evidence of
+            # the run), but scripts deserve a non-zero signal.
+            raise SystemExit(EXIT_ERROR)
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
 # TUI entry
 # ---------------------------------------------------------------------------
 
 
 @app.command()
-def tui() -> None:
+def tui(
+    theme: str = typer.Option(
+        "auto",
+        "--theme",
+        help="Color theme: auto (terminal heuristic), dark, or light.",
+    ),
+    no_color: bool = typer.Option(
+        False,
+        "--no-color",
+        help="Disable colors (sets NO_COLOR; state labels remain textual).",
+    ),
+) -> None:
     """Launch the interactive TUI (optional; every feature also has a CLI path)."""
+    if theme not in {"auto", "dark", "light"}:
+        fail(
+            f"invalid theme {theme!r}; use one of: auto, dark, light",
+            EXIT_USAGE,
+        )
     from tracefield.tui.app import run_tui
 
-    run_tui()
+    run_tui(theme=theme, no_color=no_color)
 
 
 def run() -> None:
@@ -1663,6 +1875,17 @@ def run() -> None:
         sys.exit(EXIT_ERROR)
     except SystemExit:
         raise  # explicit exit codes raised by command bodies
+    except StorageUnavailableError as exc:
+        # Locked / corrupt / unwritable store: an environment/availability
+        # problem, not a bug. Documented as exit 5 (unavailable).
+        log.error(str(exc), extra={"event": "fail", "exit_code": EXIT_UNAVAILABLE})
+        err_console.print(f"[red]error:[/red] {s(str(exc), 300)}")
+        sys.exit(EXIT_UNAVAILABLE)
+    except SchemaVersionError as exc:
+        # A DB written by a newer TRACEFIELD: environment problem, not a bug.
+        log.error(str(exc), extra={"event": "fail", "exit_code": EXIT_UNAVAILABLE})
+        err_console.print(f"[red]error:[/red] {s(str(exc), 300)}")
+        sys.exit(EXIT_UNAVAILABLE)
     except Exception as exc:  # CLI boundary catch-all
         log.exception(
             "unhandled error", extra={"event": "unhandled", "exc_type": type(exc).__name__}

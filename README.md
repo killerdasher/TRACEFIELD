@@ -106,11 +106,11 @@ manifest OK — N files re-hashed, all intact
 | `hash` / `inspect [--deep]` / `ocr` | **implemented** | Backends optional; UNAVAILABLE is honest |
 | `fetch --fetch` (SSRF-guarded) / `username check` | **implemented** | Opt-in; soft-404 markers; 1 req/s; no bulk mode |
 | Tool catalogue + tiered `tools status` | **implemented** | 2,264 inert records; counts never padded |
-| TUI | **experimental** | Keyboard workflow tested headless; no case selector yet |
+| TUI | **experimental** | Keyboard workflow tested headless; active-case model + `c` case picker |
 | Structured logging (JSONL audit) | **implemented** | `command`/`fail`/`unhandled` events; redacted, capped, `0600` |
 | Health-check job for catalogue rows | **planned** | Schema fields exist, no job |
 | Perceptual hashing for images | **planned** | |
-| Plugin/adapter entry points | **planned** | Adapter contract documented in CONTRIBUTING |
+| Plugin/adapter entry points | **implemented** | Typed `ToolAdapter` boundary in `src/tracefield/adapters.py`; `integration_state=integrated` requires an adapter proven end-to-end; proposal flow in CONTRIBUTING |
 | Retention / erasure workflow | **planned** | |
 
 ## Evidence flow (how a conclusion traces to bytes)
@@ -201,12 +201,17 @@ provenance and licence rules: `data/catalog/source-manifest.json` and
   you; TRACEFIELD reports them as unavailable rather than faking success.
 - Username checks cover a deliberately small curated provider set with
   conservative match rules; Sherlock/Maigret cover 10–1000× more sites.
-- The TUI is experimental: no case selector, no async worker offload; every
-  feature also has a CLI path.
-- Catalogue rows are links + project-authored factual summaries; there is no
-  adapter layer yet, so `integrated`/`healthy` counts are zero by design.
-- No performance benchmarks are published; none have been run beyond a
-  startup smoke timing in `docs/strategy/IMPLEMENTATION_STATUS.md`.
+- The TUI is experimental but functional: it has an active-case model with a
+  `c` case picker, runs repo queries via async workers (`run_worker`), and
+  supports cooperative `Ctrl+C` cancellation — every feature also has a CLI
+  path.
+- Catalogue rows are links + project-authored factual summaries. A typed
+  adapter contract exists (`src/tracefield/adapters.py`); the counts stay
+  tiered and honest — `indexed` 2,254, `verified` 10, `integrated` 0 (only
+  rows proven end-to-end by the test suite earn a higher tier).
+- Performance is recorded as a baseline, not a benchmark claim: TUI
+  switch+load ~0.9 s at 5,000 rows, `build_report` sub-millisecond on small
+  cases (`PHASE_07_REPORT_TESTING.md`).
 
 ## Architecture
 

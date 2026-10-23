@@ -9,11 +9,13 @@ acceptance tests: [`tests.json`](https://github.com/OWASP/OWASP-Open-Source-Inte
 **Assessed product:** TRACEFIELD 0.1.0 (pre-first-release), data schema v1.
 **Assessment date:** 2026-10-19.
 **Rule versions in scope:** `assess-r2` (claim assessment), `contra-r2`
-(contradiction detection), `origin-r3` (origin clustering), report schema v1.
+(contradiction detection), `origin-r3` (origin clustering), report schema v2
+(v2 is additive to the assessed v1: adds generated_at/tool/document
+dissemination block, 2026-10-19; v1 fields unchanged).
 **Assessment type:** maintainer self-assessment against the OOVS requirement
-objectives, evidenced by source and the automated test suite (203 tests passing
-at assessment time: `tests/unit`, `tests/integration`, `tests/security`,
-`tests/e2e/test_demo_case.py`).
+objectives, evidenced by source and the automated test suite (207 tests passing
+at assessment time, re-verified 2026-10-19: `tests/unit`, `tests/integration`,
+`tests/security`, `tests/e2e/test_demo_case.py`; the earlier draft cited 203).
 
 ## This document is not a certification
 

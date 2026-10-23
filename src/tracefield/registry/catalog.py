@@ -251,3 +251,20 @@ class Catalog:
                 if "=" in env or len(env) > 100:
                     problems.append(f"{e.id}: suspicious key_env_vars entry {env!r}")
         return problems
+
+
+def default_catalog_path() -> Path:
+    """Path of the catalogue shipped with this installation.
+
+    Single source of truth for CLI *and* TUI so the two can never drift
+    on where the inert catalogue lives. Falls back to the repo layout
+    (``data/catalog/tools.jsonl``) when running from a source checkout;
+    packaging work (G7) makes the wheel layout the primary target.
+    """
+    import tracefield as _tf
+
+    pkg = Path(_tf.__file__).resolve().parent
+    wheel_candidate = pkg / "data" / "catalog" / "tools.jsonl"
+    if wheel_candidate.exists():
+        return wheel_candidate
+    return pkg.parent.parent / "data" / "catalog" / "tools.jsonl"

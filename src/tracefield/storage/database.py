@@ -226,6 +226,24 @@ END;
 _MIGRATIONS: dict[int, str] = {1: _MIGRATION_1}
 
 
+class SchemaVersionError(RuntimeError):
+    """The database was written by a newer TRACEFIELD than this build.
+
+    Refusing loudly beats guessing: an unknown future schema must never be
+    silently opened (and potentially mis-parsed) by an older binary.
+    """
+
+
+class StorageUnavailableError(RuntimeError):
+    """The store could not be opened (locked, corrupt, or unwritable).
+
+    A storage *availability* problem — not a bug and not a schema mismatch.
+    The CLI maps this to the documented "unavailable" exit code (5) so a
+    concurrent-writer lock or a damaged file is never reported as a generic
+    failure (exit 1). Cause carries the underlying sqlite3 error.
+    """
+
+
 class Database:
     """Thin wrapper over sqlite3 with migrations and foreign-key enforcement."""
 
@@ -233,12 +251,20 @@ class Database:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
-        self._conn.execute("PRAGMA journal_mode = WAL")
-        self._conn.execute("PRAGMA busy_timeout = 5000")
-        # Restrict at-rest permissions: case data must not be world-readable.
-        self.migrate()
+        try:
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA foreign_keys = ON")
+            # WAL probe raises DatabaseError on a corrupt/truncated file.
+            self._conn.execute("PRAGMA journal_mode = WAL")
+            self._conn.execute("PRAGMA busy_timeout = 5000")
+            # Restrict at-rest permissions: case data must not be world-readable.
+            self.migrate()
+        except Exception:
+            # A half-built instance (corrupt/truncated file, newer-schema
+            # refusal, any setup or migration failure) must not leak an open
+            # connection into the GC unraisable handler.
+            self._conn.close()
+            raise
         with suppress(OSError):
             self.path.chmod(0o600)
 
@@ -260,6 +286,11 @@ class Database:
         else:
             row = self._conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
             version = int(row["value"]) if row else 0
+        if version > SCHEMA_VERSION:
+            raise SchemaVersionError(
+                f"database schema v{version} is newer than this build supports "
+                f"(v{SCHEMA_VERSION}); upgrade TRACEFIELD or restore a matching backup"
+            )
         for target in range(version + 1, SCHEMA_VERSION + 1):
             script = _MIGRATIONS[target]
             with self.tx() as conn:

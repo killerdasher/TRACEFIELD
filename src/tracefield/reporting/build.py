@@ -10,9 +10,10 @@ import html
 import json
 from typing import Any
 
+from tracefield import __version__
 from tracefield.config import Settings
 from tracefield.core.analysis import assess_claim
-from tracefield.core.domain import Case
+from tracefield.core.domain import Case, utcnow
 from tracefield.storage.database import Database
 from tracefield.storage.repositories import (
     AssertionRepo,
@@ -20,11 +21,14 @@ from tracefield.storage.repositories import (
     ClusterRepo,
     EventRepo,
     EvidenceRepo,
+    ObservationRepo,
     RelationRepo,
     SourceRepo,
 )
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = (
+    2  # v2 adds the dissemination block (generated_at, tool, document); additive to v1
+)
 
 
 def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str, Any]:
@@ -35,6 +39,7 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
     assertions = AssertionRepo(db).list_for_case(case.id)
     clusters = ClusterRepo(db).list_for_case(case.id)
     events = EventRepo(db).list_for_case(case.id)
+    observations = ObservationRepo(db).list_for_case(case.id)
 
     assessments = []
     for claim in claims:
@@ -45,6 +50,17 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
 
     return {
         "report_schema_version": REPORT_SCHEMA_VERSION,
+        "generated_at": utcnow(),
+        "tool": {"name": "tracefield", "version": __version__},
+        "document": {
+            # Dissemination controls (OOVS-09): who authored this report,
+            # which revision it is, and any recorded corrections. When no
+            # author identity is configured the report says so honestly
+            # rather than inventing one.
+            "author": settings.report_author or "author not set",
+            "revision": 1,
+            "corrections": [],
+        },
         "case": case.model_dump(),
         "counts": {
             "sources": len(sources),
@@ -54,6 +70,7 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
             "assertions": len(assertions),
             "origin_clusters": len(clusters),
             "analysis_events": len(events),
+            "observations": len(observations),
         },
         "sources": [s.model_dump() for s in sources],
         "claims": [c.model_dump() for c in claims],
@@ -61,6 +78,7 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
         "relations": [r.model_dump() for r in relations],
         "assertions": [a.model_dump() for a in assertions],
         "origin_clusters": [c.model_dump() for c in clusters],
+        "observations": [o.model_dump() for o in observations],
         "assessments": assessments,
         "global_caveats": [
             "SHA-256 digests prove byte-level integrity of stored objects, not "
@@ -91,12 +109,29 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"{counts['evidence']} evidence, {counts['relations']} relations"
     )
     lines.append(f"- **Report schema:** v{payload['report_schema_version']}")
+    lines.append(f"- **Generated:** {payload['generated_at']}")
+    lines.append(f"- **Tool:** {payload['tool']['name']} {payload['tool']['version']}")
+    doc = payload["document"]
+    lines.append(f"- **Author:** {doc['author']}")
+    lines.append(f"- **Revision:** {doc['revision']}")
+    corrections = doc["corrections"]
+    if corrections:
+        lines.append(f"- **Corrections:** {len(corrections)} recorded (see below)")
+    else:
+        lines.append("- **Corrections:** none recorded")
     lines.append("")
 
     lines.append("## Caveats")
     lines.append("")
     for c in payload["global_caveats"]:
         lines.append(f"> {c}")
+        lines.append("")
+
+    if corrections:
+        lines.append("## Corrections")
+        lines.append("")
+        for corr in corrections:
+            lines.append(f"- {corr.get('at', '')} — {corr.get('note', '')}")
         lines.append("")
 
     lines.append("## Sources")
@@ -227,11 +262,26 @@ def render_html(payload: dict[str, Any]) -> str:
         f"{counts['evidence']} evidence, {counts['relations']} relations</li>"
     )
     out.append(f"<li><b>Report schema:</b> v{_h(payload['report_schema_version'])}</li>")
+    out.append(f"<li><b>Generated:</b> {_h(payload['generated_at'])}</li>")
+    out.append(
+        f"<li><b>Tool:</b> {_h(payload['tool']['name'])} {_h(payload['tool']['version'])}</li>"
+    )
+    _doc = payload["document"]
+    out.append(f"<li><b>Author:</b> {_h(_doc['author'])}</li>")
+    out.append(f"<li><b>Revision:</b> {_h(_doc['revision'])}</li>")
+    out.append(f"<li><b>Corrections:</b> {_h(len(_doc['corrections']))} recorded</li>")
+    out.append(f"<li><b>Report schema:</b> v{_h(payload['report_schema_version'])}</li>")
     out.append("</ul>")
 
     out.append("<h2>Caveats</h2>")
     for c in payload["global_caveats"]:
         out.append(f'<p class="caveat">{_h(c)}</p>')
+    _corr = payload["document"]["corrections"]
+    if _corr:
+        out.append("<h2>Corrections</h2><ul>")
+        for corr in _corr:
+            out.append(f"<li>{_h(corr.get('at', ''))} — {_h(corr.get('note', ''))}</li>")
+        out.append("</ul>")
 
     out.append("<h2>Sources</h2>")
     if not payload["sources"]:

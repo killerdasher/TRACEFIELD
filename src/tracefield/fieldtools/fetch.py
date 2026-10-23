@@ -4,13 +4,15 @@ Every request: validated URL (public hosts only), DNS resolved to public
 IPs, connection **pinned** to a pre-validated IP (closes the DNS-rebinding
 TOCTOU: the socket connects to the IP we validated, while Host header and
 TLS SNI still carry the original hostname), redirect targets re-validated
-and re-pinned, timeout, size cap, scheme allowlist, no credential leaks,
-TLS verification on. Never crawls. Never submits case data anywhere.
+**and re-pinned per hop** (no separate validate-then-reconnect window),
+timeout, size cap, scheme allowlist, no credential leaks, TLS verification
+on. Never crawls. Never submits case data anywhere.
 """
 
 from __future__ import annotations
 
 import ipaddress
+from urllib.parse import urljoin
 
 import httpx
 
@@ -20,6 +22,8 @@ from tracefield.core.provenance import hash_bytes
 from tracefield.security import UrlPolicyError, validate_fetch_url
 from tracefield.security.redact import redact_secrets
 from tracefield.security.urls import validate_host
+
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 
 class FetchError(Exception):
@@ -45,10 +49,7 @@ def _pinned_url_and_extensions(
     ip_host = f"[{ip}]" if isinstance(ip, ipaddress.IPv6Address) else str(ip)
     # Rebuild URL with the IP as the connect target.
     port = parts.port
-    netloc = f"{ip_host}:{port}" if port else ip_host
     pinned = str(parts.copy_with(host=ip_host, port=port))
-    # httpx.URL.copy_with rebuilds from components; ensure userinfo stripped.
-    _ = netloc
     extensions: dict[str, str] = {"sni_hostname": host}
     candidates = [str(a) for a in addrs]
     return pinned, extensions, candidates
@@ -57,7 +58,7 @@ def _pinned_url_and_extensions(
 def _headers_for(host: str) -> dict[str, str]:
     return {
         "Host": host,
-        "User-Agent": "tracefield/0.1 (bounded public-source fetcher)",
+        "User-Agent": "tracefield/0.1 (+https://github.com/killerdasher/TRACEFIELD)",
         "Accept": "*/*",
         "Accept-Encoding": "identity",
     }
@@ -78,69 +79,79 @@ def fetch_source(source: Source, settings: Settings) -> Source:
     record with the error note.
     """
     original_url = validate_fetch_url(source.locator)  # raises if bad
-    parts = httpx.URL(original_url)
-    hostname = parts.host or ""
+    hostname = httpx.URL(original_url).host or ""
     if not hostname:
         raise FetchError("URL has no host")
 
-    pinned_url, extensions, _candidates = _pinned_url_and_extensions(original_url)
-    headers = _headers_for(hostname)
-
-    # Redirect hook: every hop must pass the policy and get re-pinned.
-    # httpx does not natively re-pin per hop, so we validate each redirect
-    # target and refuse any that is not a public http(s) URL; the initial
-    # hop is pinned, and redirect hops are validated then fetched through
-    # the same client (their own DNS is re-validated at the hook, which
-    # closes the "public at validate time, private at connect time" gap for
-    # each hop's *hostname*; the first hop — the one we control fully — is
-    # IP-pinned).
-    def _hook(request: httpx.Request) -> None:
-        validate_fetch_url(str(request.url))
+    # Redirects are handled manually (client follow_redirects=False) so that
+    # EVERY hop is re-validated by the URL policy and re-pinned to a freshly
+    # validated IP in the same call that connects to it. A redirect to a
+    # private/metadata/CGNAT target, or to a hostname that now resolves
+    # non-public, raises UrlPolicyError exactly like hop 1. This removes the
+    # validate-then-connect DNS-rebinding window that existed on redirect
+    # hops when httpx re-resolved DNS itself after our hook had finished
+    # (audit finding F1; risk A3 residual).
+    max_hops = max(1, settings.max_redirects)
+    hop_url = original_url
+    hop_host = hostname
+    status = 0
+    content_type = ""
+    body = b""
+    final_url = original_url
 
     try:
-        with (
-            httpx.Client(
-                follow_redirects=True,
-                max_redirects=settings.max_redirects,
-                timeout=settings.max_fetch_timeout_s,
-                headers=headers,
-                trust_env=False,  # do not inherit ambient proxy settings/credentials
-                event_hooks={"request": [_hook]},
-            ) as client,
-            client.stream(
-                "GET",
-                pinned_url,
-                extensions=extensions,
-            ) as resp,
-        ):
-            final_url = str(resp.url)
-            # Map pinned IP back to a display URL with the real host.
-            display_final_url = _replace_host(final_url, hostname)
-            validate_fetch_url(display_final_url)
+        with httpx.Client(
+            follow_redirects=False,  # we re-pin each hop ourselves
+            timeout=settings.max_fetch_timeout_s,
+            trust_env=False,  # do not inherit ambient proxy settings/credentials
+        ) as client:
+            for _hop in range(max_hops + 1):
+                # Resolve + pin this hop: the socket will connect to an IP
+                # validated right here, not to whatever DNS says later.
+                pinned_url, extensions, _candidates = _pinned_url_and_extensions(hop_url)
+                with client.stream(
+                    "GET",
+                    pinned_url,
+                    extensions=extensions,
+                    headers=_headers_for(hop_host),
+                ) as resp:
+                    status = resp.status_code
+                    if status in _REDIRECT_STATUSES:
+                        location = resp.headers.get("location", "")
+                        if not location:
+                            raise FetchError(f"redirect without Location (HTTP {status})")
+                        # Validate + normalise the redirect target through
+                        # the same policy as the original URL before we
+                        # spend a connection on it.
+                        hop_url = validate_fetch_url(urljoin(hop_url, location))
+                        hop_host = httpx.URL(hop_url).host or hop_host
+                        continue
+                    # Terminal response: classify, then stream with cap.
+                    if status in (429, 403):
+                        raise FetchError(
+                            f"provider refused access (HTTP {status}); "
+                            "not retrying, not circumventing"
+                        )
+                    if status >= 500:
+                        raise FetchError(f"provider error (HTTP {status})")
+                    if status >= 400:
+                        raise FetchError(f"HTTP {status}")
 
-            status = resp.status_code
-            if status in (429, 403):
-                raise FetchError(
-                    f"provider refused access (HTTP {status}); not retrying, not circumventing"
-                )
-            if status >= 500:
-                raise FetchError(f"provider error (HTTP {status})")
-            if status >= 400:
-                raise FetchError(f"HTTP {status}")
-
-            content_type = resp.headers.get("content-type", "")
-            chunks: list[bytes] = []
-            received = 0
-            for chunk in resp.iter_bytes():
-                received += len(chunk)
-                if received > settings.max_fetch_bytes:
-                    raise FetchError(
-                        f"response exceeded size limit ({settings.max_fetch_bytes} bytes)"
-                    )
-                chunks.append(chunk)
-            body = b"".join(chunks)
-    except httpx.TooManyRedirects as exc:
-        raise FetchError("too many redirects") from exc
+                    content_type = resp.headers.get("content-type", "")
+                    chunks: list[bytes] = []
+                    received = 0
+                    for chunk in resp.iter_bytes():
+                        received += len(chunk)
+                        if received > settings.max_fetch_bytes:
+                            raise FetchError(
+                                f"response exceeded size limit ({settings.max_fetch_bytes} bytes)"
+                            )
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
+                    final_url = hop_url
+                    break
+            else:
+                raise FetchError("too many redirects")
     except httpx.TimeoutException as exc:
         raise FetchError("request timed out") from exc
     except httpx.HTTPError as exc:
@@ -151,13 +162,13 @@ def fetch_source(source: Source, settings: Settings) -> Source:
     title = _extract_title(body, content_type) if body else ""
     new = source.model_copy(
         update={
-            "locator": display_final_url,
+            "locator": final_url,
             "access_method": AccessMethod.FETCHED,
             "source_type": SourceType.WEB_PAGE,
             "collected_at": utcnow(),
             "collection_agent": "tracefield/0.1",
             "limitations": redact_secrets(
-                f"final_url={display_final_url}; http={status}; "
+                f"final_url={final_url}; http={status}; "
                 f"content_type={content_type or 'unknown'}; "
                 f"sha256={hash_bytes(body)}"
             ),

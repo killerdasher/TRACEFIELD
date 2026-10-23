@@ -184,3 +184,88 @@ backlog). STIX/TAXII and CASE/UCO were considered and **rejected for P0**: no
 concrete interoperability consumer exists in scope, and the dependency/mapping
 cost would buy no analyst capability. Revisit when an export target requests
 one of them.
+
+## D15 — Packaging: catalogue data ships inside the wheel (P0, from audit G7)
+
+The fresh-venv install test (2026-10-19) proved the wheel cannot serve
+catalogue commands: `data/` is excluded by the wheel target and
+`cli/main.py:1186` assumes a source checkout. Decision: **`data/catalog/` is
+part of the distribution** — wheel target gains a force-include of the
+catalogue into the package, and path resolution becomes package-relative with
+the current repo-relative lookup retained as fallback for editable installs.
+Failure mode when data is genuinely absent keeps exit `2` (not found) with
+the existing explicit message. Source-tree behaviour and the 2,264-record
+validation gate are unchanged. (Debt #5 promoted to P0.)
+
+## D16 — Redirects: every `--fetch` hop gets first-hop-grade treatment (from audit F1)
+
+The first hop is IP-pinned; redirect hops are only policy-validated inside
+the request hook, leaving a validate-then-connect DNS-rebinding window. The
+inline comment claiming full coverage is wrong and must be corrected with the
+fix. Decision: handle redirects **manually up to `max_redirects`**, re-running
+`validate_host` + connection pinning (and Host/SNI preservation) per hop —
+same guarantees as hop 1 — rather than letting `httpx` reconnect on fresh
+DNS. If a hop cannot be pinned, fail closed with exit `4` (network blocked).
+
+## D17 — Scope boundary: no evasion features, ever (from audit §5 / research refresh)
+
+Research refresh (2026-10-19) recorded that Maigret offers CAPTCHA/anti-bot
+"partial bypass" and FlareSolverr integration. Decision: TRACEFIELD **never**
+integrates CAPTCHA-solving, Cloudflare/bot-evasion, or similar bypass
+behaviours — collection stays on plainly reachable public endpoints under the
+doubly-opt-in network model (brief: no captcha evasion). Catalogue
+descriptions may state such features factually for other tools, with no
+endorsement and no wiring. Also recorded: `run_backend` gains an enforced
+literal allowlist (`exiftool`, `ffprobe`, `tesseract`) matching its existing
+docstring, and `migrate()` must refuse a newer-schema DB with exit `5`
+(unavailable) instead of silently succeeding (audits F2, F3).
+
+## D18 — Mission planner: deterministic table-driven ranking, no model, proposal-only
+
+The planner (`src/tracefield/planner.py`, `plan-r1`) is a fixed, versioned
+capability table (9 built-in capabilities) plus optional inert-catalogue
+suggestions. Design commitments, all test-pinned:
+
+- **Determinism**: iteration order is fixed (capability tuple order, sorted
+  matched terms, lexicographic tie-break); no clock, RNG, or network can
+  influence output. Same question ⇒ byte-identical plan (`TEST-VERIFIED`).
+- **Ranking**: integer score tuple `(coverage, -steps, -network)` compared
+  lexicographically. Explicitly **not** a probability of anything — the
+  no-percentages rule (constitution §5) applies to plans too.
+- **Multi-path**: `offline-first` (local-only) vs `bounded-network`
+  (includes opt-in collection; every network step states its opt-in). Paths
+  are policy variants of the same coverage, not competing forecasts.
+- **Proposal-only**: the planner module imports no `httpx`/`socket`/
+  `subprocess` (test-pinned); it never executes a step. Approval-before-
+  external-action is preserved structurally: the only executor remains the
+  user running the printed command.
+- **Honest gaps**: unmatched question terms are reported as
+  `unresolved_terms`; an all-gibberish question yields zero-step paths
+  rather than invented work.
+
+## D19 — Adapter ecosystem: one typed boundary, one verified adapter, honest states
+
+`src/tracefield/adapters.py` is the single sanctioned path from TRACEFIELD
+to an external backend. Design commitments, test-pinned:
+
+- **Typed, declared, never discovered**: every backend is an `AdapterSpec`
+  (frozen dataclass) whose `backend` literal must be in the Phase-2
+  allowlist — enforced at construction AND re-checked at call time. The
+  registry is a code-review artefact, not a runtime scan.
+- **One reference adapter, no bulk claims**: exactly `exiftool-meta` may
+  claim `integrated` (it is exercised end-to-end by our suite);
+  `ffprobe-streams` and `tesseract-ocr` are typed `spec-only` — the
+  boundary exists, the integration is not verified here. Catalogue
+  `HEALTHY` remains unreachable from the adapter layer: we persist no
+  dated health checks, so the vocabulary offers only factual `ready`
+  (version probe answered *now*), `missing-backend`, `disabled`, `blocked`.
+- **Kill switch + network posture**: `TRACEFIELD_ADAPTERS=0` disables all
+  adapters (maps to exit `5` unavailable); every shipped spec is
+  local-only, and a future network spec must set `needs_network=True`,
+  which then requires BOTH `TRACEFIELD_ALLOW_NETWORK=1` and a per-call
+  opt-in — mirroring the fetch policy (D17).
+- **Raw first**: `adapters run` stores the tool's raw return verbatim in
+  the case workspace (`observations/<obs_id>.json`, 0600) and records an
+  Observation referencing it; interpretation stays a reviewable layer.
+  Reports now carry `observations` (schema v2, additive) so raw returns
+  surface without being promoted to findings.

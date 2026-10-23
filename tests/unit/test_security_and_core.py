@@ -267,7 +267,14 @@ def _xss_payload() -> dict:
     """Minimal report payload with attacker-shaped strings in every field."""
     evil = "<script>alert(1)</script>"
     return {
-        "report_schema_version": 1,
+        "report_schema_version": 2,
+        "generated_at": "2026-10-19T00:00:00Z",
+        "tool": {"name": "tracefield", "version": "0.1.0"},
+        "document": {
+            "author": evil,  # author is attacker-shapeable: must be escaped too
+            "revision": 1,
+            "corrections": [{"note": evil}],
+        },
         "case": {
             "id": "case_x",
             "title": evil,

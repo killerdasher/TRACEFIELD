@@ -87,18 +87,31 @@ class TestRedirectPolicy:
             server.server_close()
             thread.join(timeout=5)
 
-    def test_redirect_hook_revalidates(self) -> None:
-        """Contract: fetch must re-run the URL policy on every redirect
-        hop via an httpx request event hook (private redirect targets are
-        refused). Pins the wiring — the policy function itself is tested
-        above/below."""
+    def test_redirect_hop_is_revalidated_and_repinned(self) -> None:
+        """Contract: fetch must re-run the URL policy **and** re-pin the
+        connection for **every** redirect hop (private redirect targets are
+        refused; the socket always connects to a freshly validated IP).
+        Pins the wiring — the policy function itself is tested above/below.
+
+        The redirect loop is manual (client `follow_redirects=False`) and each
+        hop calls `_pinned_url_and_extensions` + `validate_fetch_url`, so there
+        is no separate validate-then-reconnect window (audit F1 fix).
+        """
         fetch_py = (
             Path(__file__).resolve().parents[2] / "src" / "tracefield" / "fieldtools" / "fetch.py"
         )
         src = fetch_py.read_text(encoding="utf-8")
-        assert "event_hooks" in src, "fetch must install a request event hook"
-        assert "validate_fetch_url(str(request.url))" in src, (
-            "the redirect hook must call validate_fetch_url on each hop"
+        assert "follow_redirects=False" in src, (
+            "fetch must drive redirects manually so each hop can be re-pinned"
+        )
+        assert "_pinned_url_and_extensions(hop_url)" in src, (
+            "each redirect hop must be re-pinned to a freshly validated IP"
+        )
+        assert "validate_fetch_url(urljoin(hop_url, location))" in src, (
+            "each redirect target must re-enter the URL policy"
+        )
+        assert "follow_redirects=True" not in src, (
+            "httpx must never follow redirects on its own (that re-resolves DNS without re-pinning)"
         )
         # And the policy itself refuses a private redirect destination.
         with pytest.raises(UrlPolicyError):
@@ -108,27 +121,71 @@ class TestRedirectPolicy:
 
 
 class TestSubprocessAllowlist:
-    def test_run_backend_rejects_missing_binary(self) -> None:
+    def test_run_backend_rejects_non_allowlisted_binary(self) -> None:
+        """run_backend must refuse any executable outside the allowlist,
+        before PATH lookup (audit F2: the docstring promised an allowlist;
+        now it is enforced)."""
         from tracefield.fieldtools.inspect import run_backend
 
-        with pytest.raises(FileNotFoundError):
-            run_backend(["definitely-not-a-real-binary-9876", "--version"])
+        for bad in ("sh", "bash", "python3", "rm", "/usr/bin/id"):
+            with pytest.raises(ValueError, match="not allowlisted"):
+                run_backend([bad, "-c", "true"])
+
+    def test_run_backend_allowlist_is_exact(self) -> None:
+        from tracefield.fieldtools import inspect as inspect_mod
+
+        assert {"exiftool", "ffprobe", "tesseract"} == inspect_mod._ALLOWED_BACKENDS
+
+    def test_run_backend_rejects_missing_binary(self) -> None:
+        """An allowlisted binary that is absent raises FileNotFoundError so
+        callers can report UNAVAILABLE (not a crash)."""
+        import shutil as _shutil
+
+        from tracefield.fieldtools import inspect as inspect_mod
+
+        # Force PATH lookup to miss for an allowlisted name; the allowlist
+        # check passes, the presence check must then fail cleanly.
+        def _none(exe: str) -> str | None:
+            return None
+
+        orig = _shutil.which
+        inspect_mod.shutil.which = _none  # type: ignore[assignment]
+        try:
+            with pytest.raises(FileNotFoundError):
+                inspect_mod.run_backend(["tesseract", "--version"])
+        finally:
+            inspect_mod.shutil.which = orig  # type: ignore[assignment]
 
     def test_run_backend_no_shell_interpolation(self) -> None:
-        """Argument arrays only — a metacharacter-laden 'binary' name must
-        not execute anything."""
+        """Argument arrays only, and now allowlist-first — a metacharacter-
+        laden 'binary' name is rejected before PATH lookup, so `;` can never
+        run `id` even in principle."""
         from tracefield.fieldtools.inspect import run_backend
 
-        with pytest.raises(FileNotFoundError):
-            # If this were passed through a shell, `;` would run `id`.
+        with pytest.raises(ValueError, match="not allowlisted"):
             run_backend(["nonexistent; id", "x"])
 
     def test_env_is_minimal(self) -> None:
-        from tracefield.fieldtools.inspect import run_backend
+        """The child env is stripped to PATH + LC_ALL regardless of the
+        parent environment. The allowlist is relaxed only inside this test so
+        we can run a known binary to observe the environment; the shipped
+        allowlist is pinned by test_run_backend_allowlist_is_exact."""
+        import os
 
-        rc, out, _ = run_backend(["/bin/sh", "-c", "echo $FOO"])
-        # FOO should not leak from the parent environment.
-        assert "SENSITIVE" not in out
+        from tracefield.fieldtools import inspect as inspect_mod
+
+        os.environ["SENSITIVE"] = "canary"
+        try:
+            orig = inspect_mod._ALLOWED_BACKENDS
+            inspect_mod._ALLOWED_BACKENDS = frozenset({"/bin/sh"})  # type: ignore[misc]
+            try:
+                rc, out, _ = inspect_mod.run_backend(["/bin/sh", "-c", "echo $FOO-$SENSITIVE"])
+            finally:
+                inspect_mod._ALLOWED_BACKENDS = orig  # type: ignore[misc]
+        finally:
+            del os.environ["SENSITIVE"]
+        # Neither FOO nor the parent SENSITIVE canary may leak into the child.
+        assert "SENSITIVE" not in out and "canary" not in out
         _ = rc
 
 
@@ -266,3 +323,35 @@ class TestSecretsNeverInLogs:
             ):
                 if secret in s:
                     assert secret not in out, f"{secret} leaked in: {out}"
+
+
+class TestSchemaVersionRefusal:
+    def test_newer_schema_db_is_refused(self, settings) -> None:
+        """A database written by a newer TRACEFIELD must be refused loudly,
+        not silently opened (audit F3). Opening it risks mis-parsing columns
+        this build does not understand."""
+        from tracefield import SCHEMA_VERSION
+        from tracefield.storage import Database, SchemaVersionError
+
+        # Build a valid DB, then bump its recorded schema version to the future.
+        db = Database(settings.db_path)
+        db._conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
+            (str(SCHEMA_VERSION + 5),),
+        )
+        db._conn.commit()
+        db.close()
+
+        with pytest.raises(SchemaVersionError, match="newer than this build"):
+            Database(settings.db_path)
+
+    def test_same_or_older_schema_still_opens(self, settings) -> None:
+        from tracefield import SCHEMA_VERSION
+        from tracefield.storage import Database
+
+        db = Database(settings.db_path)
+        assert db.schema_version == SCHEMA_VERSION
+        db.close()
+        # Reopening the same version must NOT raise.
+        db2 = Database(settings.db_path)
+        db2.close()

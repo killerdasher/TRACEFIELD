@@ -5,14 +5,17 @@
 > stream (Team B, `teams/team_b_adoption.md` §B1.2). Stars and `pushed_at` are
 > point-in-time snapshots; treat them as dated facts, not current values.
 > `[V]` = verified from a primary source on the check date. `[U]` = unverified.
+> **Refresh 2026-10-19 (post-build audit):** Sherlock / Maigret / SpiderFoot
+> rows re-verified via GitHub pages + release data (see `RESEARCH_REGISTER.md`
+> §Refresh 2026-10-19); other rows unchanged from 2026-10-16.
 
 ## Verified matrix
 
 | Tool | License (as verified) | Last activity (`pushed_at`) | Stars @ 2026-10-16 | Free / keyless | Key capabilities (verified only) |
 |---|---|---|---|---|---|
-| **Sherlock** (`sherlock-project/sherlock`) | MIT (LICENSE text verified) `[V]` | 2026-10-16T05:17:06Z | 94,272 | Free; keyless per README `[U]` (keys not stated) | Username hunting across "400+ social networks" (site claim); pipx/docker/dnf install |
-| **Maigret** (`soxoj/maigret`) | MIT ("Copyright (c) 2020-2026 Soxoj") `[V]` | 2026-10-14T16:10:52Z | 39,142 | Free; README: "No API keys required" `[V]` | Dossier-by-username, page-data collection, PyPI distribution |
-| **SpiderFoot** (`smicallef/spiderfoot`) | MIT `[V]` | 2026-04-13T19:43:06Z | 23,543 | Free self-hosted; some modules need API keys; HX is paid cloud | Web UI + CLI, "over 200 modules", YAML correlation (37 rules), SQLite, CSV/JSON/GEXF export, TOR |
+| **Sherlock** (`sherlock-project/sherlock`) | MIT (LICENSE text verified) `[V]` | 2026-10-19 (page fetch) `[V]` | ~94k (93,916 GitHub page @ 2026-10-19) `[V]` | Free; keyless per README `[U]` (keys not stated) | Username hunting across "400+ social networks" (site claim); pipx/docker/dnf install; v0.16.2 (2026-09-08); README warns broken third-party ParrotOS/Ubuntu packages; `--ignore-exclusions` may raise false positives `[V]` |
+| **Maigret** (`soxoj/maigret`) | MIT ("Copyright (c) 2020-2026 Soxoj") `[V]` | 2026-10-14T16:10:52Z (API, 2026-10-16); release v0.6.6 2026-09-18 `[V]` | 39,220 `[V]` @ 2026-10-19 | Free; README: "No API keys required" `[V]` | Dossier-by-username, 5,900 sites claimed / 5,203 enabled (0.6.6); DB auto-update every 24 h (offline fallback); optional `--ai` external API; **"partially bypasses" blocks/CAPTCHA + FlareSolverr support — evasion features TRACEFIELD must not integrate** `[V]` |
+| **SpiderFoot** (`smicallef/spiderfoot`) | MIT `[V]` | upstream 2026-04-13T19:43:06Z (API, 2026-10-16) `[V]` | 23,543 (2026-10-16) → 23,615 (2026-10-19) `[V]` | Free self-hosted; some modules need API keys; HX is paid cloud | Web UI + CLI, "over 200 modules", YAML correlation (37 rules), SQLite, CSV/JSON/GEXF export, TOR; **maintenance contested**: issue #1911 "Project Dead?" (2025-01), docs-vendor-marketing complaints, external PRs still landing 2026-10; active forks `poppopjmp/spiderfoot` (Mirage rewrite) and `Jaheay/spiderfoot` `[V]` (fork health `[U]`) |
 | **theHarvester** (`laramies/theHarvester`) | GPL-2.0 `[V]` | 2026-10-14T05:13:58Z | 17,981 | Free; some passive sources keyless `[V]` | Emails/subdomains/hosts/IPs/ASNs harvest; CLI + HarvestView evidence-review UI + local REST API; requires Python 3.14 + `uv` |
 | **holehe** (`megadose/holehe`) | GPL-3.0 `[V]` | 2024-09-10T20:24:32Z | 15,219 | Free | Email→registered-sites check; quiet >2 years at check date |
 | **ExifTool** (exiftool.org; mirror `exiftool/exiftool`) | Upstream: Artistic/GPL dual ("same terms as Perl itself"); GitHub mirror detected GPL-3.0 — **discrepancy recorded** `[V]` | mirror 2026-05-27; upstream release 13.59 (2026-05-27) | 5,169 (mirror) | Free, keyless, offline | Metadata read/write for a very large format set, `-json`, geolocation DB, MD5/SHA256/SHA512 of image data, C2PA/JUMBF read |

@@ -129,15 +129,35 @@ def _fs_times(path: Path) -> dict[str, Any]:
     return out
 
 
+_ALLOWED_BACKENDS: frozenset[str] = frozenset({"exiftool", "ffprobe", "tesseract"})
+
+# Public alias for the same frozen set: the typed adapter boundary
+# (tracefield.adapters) validates specs against it without reaching into
+# the private name.
+ALLOWED_BACKENDS: frozenset[str] = _ALLOWED_BACKENDS
+"""Enforced allowlist — the docstring promise, made real.
+
+Defence in depth: every current call site already passes a literal argv
+whose first element is one of these three local utilities, so this gate
+cannot fire in practice today. It exists so a future call site (or a
+regression that let untrusted input reach argv[0]) fails closed instead of
+executing an arbitrary executable that happens to be on PATH.
+"""
+
+
 def run_backend(
     argv: list[str], *, timeout_s: float = 30.0, max_output: int = 2_000_000
 ) -> tuple[int, str, str]:
     """Run an allowlisted local utility. Argument arrays only, never a shell.
 
-    Returns (returncode, stdout, stderr). Raises FileNotFoundError when the
-    binary is absent so callers can report UNAVAILABLE.
+    Returns (returncode, stdout, stderr). Raises ValueError when the binary
+    is not in ``_ALLOWED_BACKENDS`` (fail closed, before PATH lookup) and
+    FileNotFoundError when an allowlisted binary is absent so callers can
+    report UNAVAILABLE.
     """
     exe = argv[0]
+    if exe not in _ALLOWED_BACKENDS:
+        raise ValueError(f"backend not allowlisted: {exe!r}")
     if shutil.which(exe) is None:
         raise FileNotFoundError(exe)
     try:

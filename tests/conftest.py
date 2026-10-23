@@ -17,6 +17,8 @@ def tf_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("TRACEFIELD_HOME", str(home))
     monkeypatch.delenv("TRACEFIELD_ALLOW_NETWORK", raising=False)
     monkeypatch.delenv("TRACEFIELD_USERNAME_CHECK", raising=False)
+    monkeypatch.delenv("TRACEFIELD_ADAPTERS", raising=False)
+    monkeypatch.delenv("TRACEFIELD_REPORT_AUTHOR", raising=False)
     return home
 
 
