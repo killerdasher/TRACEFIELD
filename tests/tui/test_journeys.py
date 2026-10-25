@@ -930,6 +930,16 @@ class TestJ5Cancel:
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.5)
                 await pilot.press("3")  # claims: chunked load starts
+                # Wait until the op is genuinely in flight with at least one
+                # real reported chunk: a blind ctrl+c can land in the
+                # scheduling gap between the workspace switch and begin_op,
+                # which the product correctly treats as a quit hint (not a
+                # cancel), leaving the load to complete. Runner scheduling
+                # hits this gap inconsistently — seen once on a 3.11 CI job.
+                for _ in range(100):
+                    if app.op.state == "running" and (app.op.count or 0) > 0:
+                        break
+                    await pilot.pause(0.05)
                 mid_state, mid_count = app.op.state, app.op.count
                 await pilot.press("ctrl+c")  # cancel in-flight
                 await pilot.pause(1.5)
@@ -998,6 +1008,16 @@ class TestJ5Cancel:
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.5)
                 await pilot.press("3")
+                # Wait until the load op has actually begun: a blind ctrl+c
+                # can land in the scheduling gap between the workspace
+                # switch and begin_op, which the product correctly treats
+                # as a quit hint (not a cancel), leaving the load to
+                # complete. Faster/slower runners hit this gap
+                # inconsistently — seen once on a 3.11 CI job.
+                for _ in range(100):
+                    if app.op.state == "running":
+                        break
+                    await pilot.pause(0.05)
                 await pilot.press("ctrl+c")
                 await pilot.pause(1.5)
                 return list(app.op_log)
