@@ -172,13 +172,33 @@ behavioural tests = **295**.
 Dated audit documents (audit register, team-stream files, demo session)
 were left intact as history; no historical numbers were rewritten.
 
-## 5. CI status — stated honestly
+## 5. CI status — verified green on the watched run
 
-> **For this repair commit: NOT YET VERIFIED at the time of writing.** The
-> policy adopted in the documents above is: never claim “CI green” without a
-> passing Actions run for that exact commit. The push of this commit will
-> start that run; this document records the *repaired* state and the repair
-> of run `39967712054`, not a future run's outcome.
+The repair landed as commit `5df3a25` (run `40176575214`): the original
+defect was proven fixed — 3.12/3.13 test jobs went green with ruff, mypy,
+and the dependency audit — but the **py3.11 job flaked** on a **pre-existing**
+timing-sensitive test pair (`TestJ5Cancel::test_ctrl_c_cancels_inflight_load`
+and `…::test_cancel_is_recorded_in_op_log`, present before Phase 10,
+passing on the base CI run): a blind `ctrl+c` keypress can land in the
+scheduling gap between the workspace switch and `begin_op()`, which the
+product correctly treats as a quit hint (not a cancel), so the load
+completed and no `cancelled` op-log entry existed.
+
+Follow-up commit `73c25aa` made the two tests deterministic without touching
+product code or weakening any assertion: they now wait until the load
+operation is genuinely running with ≥ 1 real reported chunk before
+cancelling (the whole `cancel-mid-flight → cancelled with 0 < partial <
+600 → reload completes` contract asserted as before).
+
+**Watched, genuinely passing CI run for the final Phase 10 commit
+`73c25aa`:**
+`40178703473` — conclusion **success**; all six jobs green
+(`test (py3.11)` / `test (py3.12)` / `test (py3.13)`, each **295 passed,
+0 skipped** in 76.13 s / 81.13 s / 70.71 s; plus `lint (ruff)`,
+`typecheck (mypy --strict)`, `dependency audit`). The parallel CodeQL run
+`40178703447` also concluded **success**. Per the standing policy, "CI
+green" is claimed for exactly this commit because these runs were watched —
+not inferred.
 
 ## 6. Remaining blockers (P0/P1/P2)
 
@@ -207,18 +227,20 @@ because they need owner input rather than code.
 
 ## 7. Feature-phase recommendation: **No — not yet**
 
-Do not begin feature work until:
+Gate 1 above **is now satisfied** (watched green run for the Phase 10
+commit, §5). Feature work remains blocked until:
 
-1. a **genuinely passing Actions run exists for the Phase 10 commit** (see
-   §5), and
-2. the P1 blockers above are unblocked by user input (FS-17 identity, FS-18
-   route confirmation) and the next phase lands scope/authorization +
-   report-correction/dissemination controls (the standing `R-C3-1`
-   mitigation is documented, not solved).
+1. the P1 blockers are unblocked by owner input (FS-17 author identity,
+   FS-18 route confirmation), and
+2. the next phase lands scope/authorization enforcement and
+   report-correction/dissemination controls — the standing `R-C3-1`
+   mitigation is documented, not solved, and OOVS-09 (`FAIL`) needs its
+   correction mechanism.
 
 Everything needed to resume feature work afterwards is in place: suites,
-type, lint, audit, wheel, and catalogue gates are green locally on 3.11,
-3.12, and 3.13 with the CI trigger reproduced (`GITHUB_ACTIONS=true`).
+type, lint, audit, wheel, and catalogue gates are green **and** the CI run
+for the Phase 10 commit genuinely passes on all three matrix versions
+(exiftool installed → 0 skipped).
 
 ## 8. Appendix — exact reproduction commands
 
