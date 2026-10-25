@@ -47,6 +47,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+      # The only adapter with integration_state=integrated ("exiftool-meta")
+      # needs a REAL local backend for its end-to-end test; without this the
+      # adapter E2E silently skips and CI never exercises it (run
+      # 39967712054 had exactly 3 skips: unit ready-probe + 2 E2E-adjacent).
+      # tesseract/ffprobe stay absent on purpose: both adapters are honest
+      # spec-only, and their UNAVAILABLE paths are tested without them.
+      - name: Install exiftool (backend for the integrated adapter E2E)
+        run: sudo apt-get update -q && sudo apt-get install -y -q libimage-exiftool-perl
       - run: python -m pip install -e ".[dev]"
       - name: Unit + integration + security tests
         # Network-marked tests are opt-in only and never run in CI.

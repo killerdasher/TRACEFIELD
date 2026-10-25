@@ -34,6 +34,27 @@ it — live-network behaviour is exercised manually and via fixtures).
 > fixed in `PHASE_06_REPORT_TUI.md`. Nothing above was rewritten — it records
 > what was true at audit time.
 
+> **Update (2026-10-25, Phase 10: CI repair).** The 2026-10-23 push of
+> `99bf23c` had a **red CI run** (Actions run 39967712054): all three test
+> jobs (3.11/3.12/3.13) failed on exactly one test —
+> `tests/tui/test_journeys.py::TestHonestyAndThemes::test_tui_help_documents_flags` —
+> because typer's rich help rendering is forced-terminal whenever
+> `GITHUB_ACTIONS` is set, splitting `--theme`/`--no-color` with ANSI resets
+> mid-token, so the raw-substring assertion could never pass there; three
+> exiftool-gated tests also skipped because CI lacked the backend. Repairs:
+> ANSI-stripped assertions + a subprocess regression test that reproduces the
+> forced-terminal render, and exiftool installed in the CI test job so the one
+> integrated adapter (`exiftool-meta`) genuinely runs end-to-end. Local gates
+> after repair: pytest **295 passed** on each of 3.11/3.12/3.13 (0 skipped;
+> also 295 passed with `GITHUB_ACTIONS=true` set), ruff format/lint clean,
+> mypy strict clean (38 files), catalogue 2,264 valid, pip-audit clean,
+> fresh-venv wheel gates exit 0. R-A2-2 in `RISK_REGISTER.md` is now
+> **Fixed** with view-isolation proof across Evidence/Claims/Runs + reload.
+> CI-length claim policy unchanged: no "CI green" statement without a
+> passing Actions run for that exact commit — the Phase 10 report
+> (`PHASE_10_CI_REPAIR_AND_RELEASE_TRIAGE.md`) records the run that was
+> watched.
+
 ## Codebase size (measured)
 
 | Area | Files | Lines |

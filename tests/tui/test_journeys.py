@@ -20,10 +20,11 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
@@ -31,6 +32,16 @@ pytestmark = pytest.mark.integration
 
 CLAIM_TEXT = "the exhibit exists"
 EXIFTOOL_ID = "tool_001b8f8a85"
+
+# ANSI escape sequences (emitted by rich whenever the render runs under a
+# forced terminal — as on GitHub Actions, where typer's rich_utils sets
+# FORCE_TERMINAL from GITHUB_ACTIONS at import time).
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes so flag/text assertions are style-independent."""
+    return _ANSI_RE.sub("", text)
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +309,45 @@ class TestHonestyAndThemes:
     def test_tui_help_documents_flags(self, tf_home, monkeypatch, capsys) -> None:
         code, out, _ = run_cli_out(monkeypatch, capsys, ["tui", "--help"])
         assert code == 0
-        assert "--theme" in out and "--no-color" in out
+        # On GitHub Actions typer's rich help renders with FORCE_TERMINAL
+        # and inserts ANSI resets INSIDE option tokens (--theme -> ESC +
+        # '-' + ESC + '-theme'), so raw-substring matching is brittle.
+        # The contract is that the rendered help documents both flags; the
+        # strip makes the check style-independent.
+        plain = strip_ansi(out)
+        assert "--theme" in plain and "--no-color" in plain
+
+    def test_tui_help_documents_flags_when_ci_forces_terminal(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        """Regression for CI run 39967712054: typer's rich_utils sets
+        FORCE_TERMINAL=True whenever GITHUB_ACTIONS is set (read at module
+        import), rendering the help with ANSI resets even inside option
+        tokens (--theme -> ESC '-' ESC '-theme'). The help must still
+        document --theme/--no-color after stripping ANSI, in a subprocess
+        whose environment forces the terminal render deterministically."""
+        env = dict(os.environ)
+        env["GITHUB_ACTIONS"] = "1"
+        env["TRACEFIELD_HOME"] = str(tmp_path / "forced-home")
+        renderer = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.argv=['tracefield','tui','--help']"
+                "; from tracefield.cli.main import run; run()",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+            check=False,
+        )
+        assert renderer.returncode == 0
+        assert "\x1b[" in renderer.stdout, (
+            "this regression requires the forced-terminal render (typer rich help)"
+        )
+        plain = strip_ansi(renderer.stdout)
+        assert "--theme" in plain and "--no-color" in plain
 
     def test_invalid_theme_is_usage_error(self, tf_home, monkeypatch, capsys) -> None:
         code, _out, err = run_cli_out(monkeypatch, capsys, ["tui", "--theme", "neon"])
@@ -393,6 +442,116 @@ class TestCaseModel:
         assert ev_b.id in rows_b and ev_a.id not in rows_b
         # And the other case's evidence id is genuinely distinct.
         assert ev_a.id != ev_b.id
+
+    def test_two_case_isolation_across_views_and_reload(
+        self, tf_home, settings, db, tmp_path
+    ) -> None:
+        """P-TS-4 end to end: with TWO seeded cases (distinct evidence,
+        claims, and analysis events), no view — Evidence, Claims, or Runs —
+        may show the other case's rows: after selection, after navigation,
+        and after a full app reload."""
+        from tracefield.core.domain import AnalysisEvent, Claim
+        from tracefield.storage.repositories import ClaimRepo, EventRepo
+
+        exhibit_a = tmp_path / "iso-a.txt"
+        exhibit_a.write_text("alpha", encoding="utf-8")
+        exhibit_b = tmp_path / "iso-b.txt"
+        exhibit_b.write_text("bravo", encoding="utf-8")
+        case_a, ev_a = seed_case_with_evidence(db, settings, "iso-alpha", exhibit_a)
+        case_b, ev_b = seed_case_with_evidence(db, settings, "iso-bravo", exhibit_b)
+        claim_a = ClaimRepo(db).add(Claim(case_id=case_a.id, text="alpha claim"))
+        claim_b = ClaimRepo(db).add(Claim(case_id=case_b.id, text="bravo claim"))
+        evt_a = EventRepo(db).append(AnalysisEvent(case_id=case_a.id, action="probe: alpha"))
+        evt_b = EventRepo(db).append(AnalysisEvent(case_id=case_b.id, action="probe: bravo"))
+        db.close()
+
+        b_items = {ev_b.id, claim_b.id, evt_b.id}  # case-B rows
+        a_items = {ev_a.id, claim_a.id, evt_a.id}  # case-A rows
+
+        async def collect_for_case_b(
+            app,
+            pilot: Any,
+        ) -> dict[str, list[str]]:
+            await pilot.press("c")
+            await pilot.pause(0.3)
+            app.screen.query_one("#case-list").highlighted = 1  # case B (2nd row)
+            await pilot.press("enter")
+            await pilot.pause(1.0)
+            scoped: dict[str, list[str]] = {}
+            for index in (1, 2, 5):  # Evidence, Claims, Runs
+                await pilot.press(str(index + 1))
+                await pilot.pause(0.8)
+                scoped[str(index)] = list(app.view_by_index(index)._visible_keys)
+            return scoped
+
+        async def scenario() -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+            app = make_app()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause(0.5)
+                scoped = await collect_for_case_b(app, pilot)
+            app2 = make_app()  # full app reload over the same TRACEFIELD home
+            async with app2.run_test(size=(120, 40)) as pilot:
+                await pilot.pause(0.5)
+                reloaded = await collect_for_case_b(app2, pilot)
+            return scoped, reloaded
+
+        scoped, reloaded = asyncio.run(scenario())
+        for label, snap in (("selection", scoped), ("reload", reloaded)):
+            evidence, claims, runs = snap["1"], snap["2"], snap["5"]
+            for view, items in (("evidence", evidence), ("claims", claims), ("runs", runs)):
+                assert items, f"{label}/{view} must show the active case's rows"
+                found_b = b_items & set(items)
+                assert found_b, f"{label}/{view} must contain case-B rows: {items}"
+                assert not (a_items & set(items)), (
+                    f"{label}/{view} leaked another case's rows: {a_items & set(items)}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# J-NAV: the jump palette must be a real palette, not an advertised stub
+# ---------------------------------------------------------------------------
+class TestJumpPalette:
+    def test_g_opens_jump_palette_and_jumps(self, tf_home, settings, db, tmp_path) -> None:
+        exhibit = tmp_path / "nav.txt"
+        exhibit.write_text("x", encoding="utf-8")
+        seed_case_with_evidence(db, settings, "nav-case", exhibit)
+        db.close()
+
+        async def scenario() -> list[str]:
+            seen: list[str] = []
+            app = make_app()
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause(0.5)
+                await pilot.press("g")
+                await pilot.pause(0.3)
+                assert type(app.screen).__name__ == "JumpScreen"
+                # The palette carries a real, labelled entry per workspace.
+                options = app.screen.query_one("#jump-list")
+                labels = [
+                    str(option.prompt)
+                    for option in options._options  # type: ignore[attr-defined]
+                ]
+                assert len(labels) == 6, labels
+                assert any("Claims" in label for label in labels)
+                # Esc cancels without jumping.
+                await pilot.press("escape")
+                await pilot.pause(0.3)
+                seen.append(app._status_text())
+                # Selecting an entry jumps for real (type-to-jump: "3" = Claims).
+                await pilot.press("g")
+                await pilot.pause(0.3)
+                await pilot.press("3")
+                await pilot.pause(0.8)
+                seen.append(app._status_text())
+            return seen
+
+        cancelled_then_jumped = asyncio.run(scenario())
+        assert cancelled_then_jumped[0].startswith("Mission |"), (
+            "Esc on the palette must close it without jumping"
+        )
+        assert cancelled_then_jumped[1].startswith("Claims |"), (
+            "jump entry must land on the chosen workspace"
+        )
 
 
 # ---------------------------------------------------------------------------

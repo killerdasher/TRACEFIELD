@@ -207,8 +207,12 @@ provenance and licence rules: `data/catalog/source-manifest.json` and
   path.
 - Catalogue rows are links + project-authored factual summaries. A typed
   adapter contract exists (`src/tracefield/adapters.py`); the counts stay
-  tiered and honest — `indexed` 2,254, `verified` 10, `integrated` 0 (only
-  rows proven end-to-end by the test suite earn a higher tier).
+  tiered and honest — `indexed` 2,254, `verified` 10, and no catalogue row
+  claims `integrated` yet. Adapter-integration truth lives in the adapter
+  registry: exactly one adapter is `integrated` (`exiftool-meta`, proven
+  end-to-end by the test suite, which runs with exiftool installed in CI);
+  `ffprobe-streams` and `tesseract-ocr` are `spec-only` (UNAVAILABLE out of
+  the box until you install those backends).
 - Performance is recorded as a baseline, not a benchmark claim: TUI
   switch+load ~0.9 s at 5,000 rows, `build_report` sub-millisecond on small
   cases (`PHASE_07_REPORT_TESTING.md`).

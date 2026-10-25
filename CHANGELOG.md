@@ -56,6 +56,20 @@ Initial implementation. Shipped across the first build sessions,
   OOVS v0.1.0 self-assessment mapping (`docs/oovs/OOVS_MAPPING.md`); synthetic
   §16 demo script + recorded session (`docs/demo/`).
 
+### Fixed
+
+- **CI (Phase 10).** The GitHub Actions test jobs failed on
+  `tests/tui/test_journeys.py::TestHonestyAndThemes::test_tui_help_documents_flags`
+  because typer forces a terminal render whenever `GITHUB_ACTIONS` is set and
+  rich inserted ANSI resets *inside* option tokens (`--theme` → `ESC` `-` `ESC`
+  `-theme`), so the raw-substring assertion never matched on CI. Help text
+  assertions now match the ANSI-stripped render, with a subprocess regression
+  test reproducing the forced-terminal path. CI also installs exiftool so the
+  one integrated adapter (`exiftool-meta`) runs its end-to-end test instead of
+  silently skipping; tesseract/ffprobe stay absent (honest `spec-only`
+  adapters). Added durable coverage: jump-palette behavior (`g`/Esc/typed
+  jump) and two-case view isolation across Evidence/Claims/Runs + reload.
+
 ### Security
 
 - SSRF guard uses an explicit deny list (multicast, loopback, link-local,
