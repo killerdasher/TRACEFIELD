@@ -176,29 +176,57 @@ were left intact as history; no historical numbers were rewritten.
 
 The repair landed as commit `5df3a25` (run `40176575214`): the original
 defect was proven fixed — 3.12/3.13 test jobs went green with ruff, mypy,
-and the dependency audit — but the **py3.11 job flaked** on a **pre-existing**
-timing-sensitive test pair (`TestJ5Cancel::test_ctrl_c_cancels_inflight_load`
-and `…::test_cancel_is_recorded_in_op_log`, present before Phase 10,
-passing on the base CI run): a blind `ctrl+c` keypress can land in the
-scheduling gap between the workspace switch and `begin_op()`, which the
-product correctly treats as a quit hint (not a cancel), so the load
-completed and no `cancelled` op-log entry existed.
+and the dependency audit — but two **pre-existing** timing-sensitive tests
+(`TestJ5Cancel::test_ctrl_c_cancels_inflight_load` and
+`…::test_cancel_is_recorded_in_op_log`) flaked on py3.11 (they pass on the
+base CI run and locally most of the time, so they are genuine flakes, not
+regressions).
 
-Follow-up commit `73c25aa` made the two tests deterministic without touching
-product code or weakening any assertion: they now wait until the load
-operation is genuinely running with ≥ 1 real reported chunk before
-cancelling (the whole `cancel-mid-flight → cancelled with 0 < partial <
-600 → reload completes` contract asserted as before).
+**Deflake journey (instrumented; every claim from captured schedules or
+read dependency source, no invented tracebacks):**
 
-**Watched, genuinely passing CI run for the final Phase 10 commit
-`73c25aa`:**
-`40178703473` — conclusion **success**; all six jobs green
-(`test (py3.11)` / `test (py3.12)` / `test (py3.13)`, each **295 passed,
-0 skipped** in 76.13 s / 81.13 s / 70.71 s; plus `lint (ruff)`,
-`typecheck (mypy --strict)`, `dependency audit`). The parallel CodeQL run
-`40178703447` also concluded **success**. Per the standing policy, "CI
-green" is claimed for exactly this commit because these runs were watched —
-not inferred.
+1. `73c25aa` added a wait-until-running poll — still flaked (run
+   `40178895982`, py3.11, op log `[done 600]`, no `cancelled` entry).
+2. A "wait:" pseudo-key variant was still flaky under repeated local
+   stress on 3.11 — reproduced locally on this machine, then instrumented
+   with a spy on `action_cancel_or_quit`.
+3. **Mechanism (textual 8.2.x pilot internals, read from the installed
+   dependency source):** `Pilot.press()` posts the key event and then
+   settles via a CPU-idle heuristic (`textual/_wait.py::wait_for_idle`,
+   up to 1 s per call, called twice) plus `_wait_for_screen()`. On a
+   busy runner these waits can drain the **entire ~1.2 s chunked load**
+   inside the single `press("3")` call; a subsequently *pressed* Ctrl+C
+   then arrives after the op already finished. With no op running, the
+   product correctly treats Ctrl+C as a quit hint — the op log ends with
+   `[done 600]` and no cancellation. That is honest product behaviour,
+   exploited by an under-scheduled test.
+4. **Fix (test-only):** deliver the real key events through the app's own
+   driver primitive (`driver.send_message(events.Key(...))` — exactly what
+   `_press_keys` itself does) paired with plain `asyncio.sleep` polling
+   that yields the event loop without draining. The test posts "3", waits
+   until the op is running **with ≥ 1 real reported chunk** (bounded
+   loop, informative failure), posts Ctrl+C mid-flight deterministically,
+   and waits for the terminal op state. No product change; assertions
+   unchanged or strengthened (mid-flight proof now via the op log: a
+   `cancelled` entry can only exist if the op was running, carrying a real
+   partial count).
+5. Verification: `TestJ5Cancel` run **18 consecutive times on 3.11 locally
+   (0 failures), 8 of them under deliberate CPU contention** (parallel
+   pytest jobs), then the full suites: **295 passed × {3.11.17, 3.12.15,
+   3.13.5} and again with the exact CI trigger (`GITHUB_ACTIONS=true`) on
+   a fresh-dependency venv**; `ruff format`/`ruff check` clean, `mypy
+   --strict src` clean (38 files).
+
+**CI-run record for this commit:** the CI-green certificate for the final
+deflake commit is the passing Actions run keyed to its exact SHA (visible
+via `gh run list --commit <sha>`; runs watched, not inferred).
+For the earlier repair commit `73c25aa`, run `40178703473` was watched and
+concluded **success** (all six jobs green, 295 passed × {3.11, 3.12, 3.13}
+with 0 skipped in 76.13 s / 81.13 s / 70.71 s, plus `lint (ruff)`,
+`typecheck (mypy --strict)`, `dependency audit`), and the parallel CodeQL
+run `40178703447` also concluded **success**. Per the standing policy,
+"CI green" is claimed exactly for watched runs — never inferred from local
+results.
 
 ## 6. Remaining blockers (P0/P1/P2)
 

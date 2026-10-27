@@ -44,6 +44,25 @@ def strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
+def send_key(app: Any, key: str, char: str | None) -> None:
+    """Post a REAL key event through the app's own driver.
+
+    This is the same primitive textual's ``App._press_keys`` uses
+    (``driver.send_message(key_event)``), minus ``Pilot.press``'s
+    CPU-idle settling (``textual/_wait.py::wait_for_idle`` +
+    ``_wait_for_screen``), whose drain can vary the delivery moment
+    across machine speeds enough that an entire 1.2 s op completes
+    inside a single press. Pair it with plain ``asyncio.sleep`` polls
+    (which yield the event loop without draining), so a mid-flight
+    cancelling keypress is delivered deterministically.
+    """
+    from textual import events
+
+    key_event = events.Key(key, char)
+    key_event.set_sender(app)
+    app._driver.send_message(key_event)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -929,23 +948,47 @@ class TestJ5Cancel:
             app.chunk_delay = 0.2  # observable cancellation checkpoints
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.5)
-                await pilot.press("3")  # claims: chunked load starts
-                # Wait until the op is genuinely in flight with at least one
-                # real reported chunk: a blind ctrl+c can land in the
-                # scheduling gap between the workspace switch and begin_op,
-                # which the product correctly treats as a quit hint (not a
-                # cancel), leaving the load to complete. Runner scheduling
-                # hits this gap inconsistently — seen once on a 3.11 CI job.
+                # press("3", "wait:150", "ctrl+c"): "3" starts the chunked
+                # load and textual's pilot press waits out CPU-idle
+                # boundaries (textual/_wait.py wait_for_idle), which on
+                # slower runners can drain the WHOLE load before returning;
+                # a separately-pressed ctrl+c would then race the op.
+                # Deliver the real keyboard events through the driver (see
+                # send_key docstring): plain asyncio.sleep polls advance
+                # the loader between posts without Pilot's idle-drain, so
+                # "3" is followed by Ctrl+C exactly while a real chunk has
+                # been reported and is still safely before the end of the
+                # load. Mid-state proof comes from the op LOG instead of a
+                # racy snapshot: the product only records `cancelled` when
+                # an op was actually running, carrying the real partial
+                # count.
+                send_key(app, "3", "3")
+                reached = False
                 for _ in range(100):
                     if app.op.state == "running" and (app.op.count or 0) > 0:
+                        reached = True
                         break
-                    await pilot.pause(0.05)
-                mid_state, mid_count = app.op.state, app.op.count
-                await pilot.press("ctrl+c")  # cancel in-flight
-                await pilot.pause(1.5)
+                    await asyncio.sleep(0.02)
+                assert reached, (
+                    "load never reached a real in-flight checkpoint: "
+                    f"state={app.op.state} count={app.op.count}"
+                )
+                send_key(app, "ctrl+c", None)
+                for _ in range(100):
+                    if app.op_log and app.op_log[-1]["state"] in (
+                        "cancelled",
+                        "done",
+                        "failed",
+                    ):
+                        break
+                    await asyncio.sleep(0.02)
+                await pilot.pause(0.5)
                 cl_view = app.view_by_index(2)
                 cancelled_rows = cl_view.query_one("#ws-claims-table").row_count
                 status = app._status_text()
+                cancelled_log = [e for e in app.op_log if e["state"] == "cancelled"]
+                assert cancelled_log, f"cancel must be recorded: {list(app.op_log)}"
+                mid_count = cancelled_log[-1]["count"]
                 # Recovery: a later full load must succeed completely.
                 app.chunk_delay = 0.0
                 await pilot.press("2")
@@ -955,7 +998,6 @@ class TestJ5Cancel:
                 recovered_rows = cl_view.query_one("#ws-claims-table").row_count
                 recovered_state = app.op.state
                 return (
-                    mid_state,
                     mid_count,
                     cancelled_rows,
                     status,
@@ -964,15 +1006,15 @@ class TestJ5Cancel:
                 )
 
         (
-            mid_state,
             mid_count,
             cancelled_rows,
             status,
             recovered_rows,
             recovered_state,
         ) = asyncio.run(scenario())
-        assert mid_state == "running", "press must return while the op is in flight"
-        assert mid_count > 0, "progress must be a REAL reported count"
+        assert 0 < mid_count < 1500, (
+            f"cancel must record a REAL partial count (op was in flight): {mid_count}"
+        )
         assert cancelled_rows == 0, "cancel must not leave partial rows (J5)"
         assert "cancelled: Claims: load" in status
         assert recovered_rows == 1500, "reload after cancel must complete fully"
@@ -1007,19 +1049,38 @@ class TestJ5Cancel:
             app.chunk_delay = 0.2
             async with app.run_test(size=(120, 40)) as pilot:
                 await pilot.pause(0.5)
-                await pilot.press("3")
-                # Wait until the load op has actually begun: a blind ctrl+c
-                # can land in the scheduling gap between the workspace
-                # switch and begin_op, which the product correctly treats
-                # as a quit hint (not a cancel), leaving the load to
-                # complete. Faster/slower runners hit this gap
-                # inconsistently — seen once on a 3.11 CI job.
+                # Deliver the real "3"/controller keyboard events through
+                # the driver (see send_key docstring) instead of
+                # Pilot.press: Pilot's idle-drain settling made delivery
+                # timing machine-dependent — on slower runners the whole
+                # 1.2 s chunked load could complete inside the press, so a
+                # subsequently posted Ctrl+C correctly found no op to
+                # cancel (A2/Q5 recovery semantics -> quit-hint) and the
+                # op log held only done/600. Plain asyncio.sleep polls let
+                # the loader progress without that drain, so the cancel
+                # is posted mid-flight deterministically and handled at
+                # the next chunk checkpoint.
+                send_key(app, "3", "3")
+                reached = False
                 for _ in range(100):
-                    if app.op.state == "running":
+                    if app.op.state == "running" and (app.op.count or 0) > 0:
+                        reached = True
                         break
-                    await pilot.pause(0.05)
-                await pilot.press("ctrl+c")
-                await pilot.pause(1.5)
+                    await asyncio.sleep(0.02)
+                assert reached, (
+                    "load never reached a real in-flight checkpoint: "
+                    f"state={app.op.state} count={app.op.count}"
+                )
+                send_key(app, "ctrl+c", None)
+                for _ in range(100):
+                    if app.op_log and app.op_log[-1]["state"] in (
+                        "cancelled",
+                        "done",
+                        "failed",
+                    ):
+                        break
+                    await asyncio.sleep(0.02)
+                await pilot.pause(0.5)
                 return list(app.op_log)
 
         log = asyncio.run(scenario())
