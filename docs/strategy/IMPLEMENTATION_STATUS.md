@@ -70,7 +70,9 @@ it — live-network behaviour is exercised manually and via fixtures).
 > test still outstanding). Watched CI on the pushed commit `7958fa3`:
 > Actions run `40531044503` **success** (321 passed on all three pythons,
 > 0 skipped, exiftool installed) and CodeQL `40531045015` **success** —
-> both watched to completion. Details and commit list:
+> both watched to completion. The same holds for the two verification-note
+> commits (`8bbb279`: CI `40531708504` + CodeQL `40531708391`, both
+> success). Details and commit list:
 > `PHASE_11_SCOPE_REPORT_INTEGRITY.md`.
 
 ## Codebase size (measured)

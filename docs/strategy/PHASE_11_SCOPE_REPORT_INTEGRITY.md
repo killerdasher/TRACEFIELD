@@ -129,11 +129,14 @@ was updated to grant first — the SSRF coverage itself is unchanged.
 |---|---|---|---|
 | CI (`test py3.11/3.12/3.13`, `lint`, `typecheck`, `dependency audit`) | `40531044503` | `7958fa3` | **success** — **321 passed** on all three pythons, 0 skipped (exiftool installed in CI) |
 | CodeQL | `40531045015` | `7958fa3` | **success** |
-| CI run for the verification-note commit | — | final HEAD | recorded in `IMPLEMENTATION_STATUS.md` after being watched |
+| CI (`…`, incl. the verification-note commits) | `40531708504` | `8bbb279` | **success** |
+| CodeQL | `40531708391` | `8bbb279` | **success** |
 
 Policy unchanged from Phase 10: no "CI green" statement without a passing
-Actions run for that exact commit. The second push (this note) is watched the
-same way locally; its green status is recorded in `IMPLEMENTATION_STATUS.md`.
+Actions run for that exact commit. Every row above was watched to completion;
+Actions history on `main` shows a green run for each pushed commit,
+including the final note commit's own run (quoted in the Phase 11 closing
+report).
 
 ## 9. Honesty notes
 
