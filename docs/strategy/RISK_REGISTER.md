@@ -5,6 +5,10 @@
 > **Fixed** (code + test), **Mitigated** (partial mitigation shipped, residual
 > risk documented), **Accepted** (consciously carried with a rationale),
 > **Open** (not yet addressed). Severity is the review's original rating.
+>
+> Phase 11 refresh (2026-10-27): C3/R-C3-1, A1/R-A1-5, A4/R-A4-5, C3/R-C3-5,
+> and FS-20-related A3/R-A3-4 updated with dated evidence; C1/R-C1-2 partially
+> addressed (corrections/identity shipped; author string still user-gated).
 
 ## Critical / High
 
@@ -21,7 +25,7 @@
 | A5/R (orig #16) | Unhandled tracebacks; usage errors collided with NOT_FOUND | High | **Fixed** | Top-level exception mapping (usage=3, not-found=2); `dir_okay=False` on attach |
 | B3/R (orig #3) | Export corrupted its own evidence (0o400 rewrite) | High | **Fixed** | See A4/R-A4-2 |
 | C1/R-C1-1 | All reports `UNASSESSED`; empty assessments look professional | High | **Fixed** | Relations CLI + analysis wiring; report renders real outcomes + per-claim caveats |
-| C3/R-C3-1 | No authorization/scope gate before network actions | High | **Mitigated** | Network doubly opt-in (env + `--fetch`); per-request SSRF policy; **no** scope/authorization ledger — accepted for P0, documented in README non-guarantees |
+| C3/R-C3-1 | No authorization/scope gate before network actions | High | **Fixed (Phase 11, 2026-10-27)** | `case authorize --scope --authorized-by [--revoke]` records scope decisions as hash-chained analysis events; `case scope` exposes the ledger; `source add --fetch` fails (exit 4, actionable hint) unless the **latest** decision is an active grant; URL host absent from the recorded scope text draws a soft advisory. Residual: scope text is free-form, so matching is textual, not semantic; username checks stay env-gated (D20). Tests: `TestScopeLedger` incl. revoke-reblocks and a DNS-decoy fetch proving the ledger gate is separate from URL policy |
 | C4/R-C4-1 | GPS coordinates leak into terminal scrollback via warning text | High | **Fixed** | Inspect warning shows key names, not values; export lists GPS-bearing files by name only |
 | C4/R-C4-2 | Silent redaction produces text that looks verbatim but is not | High | **Mitigated** | Redaction reports rule IDs and counts; report caveats state redaction was applied; residual: operator must read the export README |
 | D2/R (orig #5) | Terminal injection (ANSI/OSC) via locators/filenames | High | **Fixed** | `s()` escape at every render site; CLI injection tests |
@@ -34,23 +38,23 @@
 | A1/R-A1-2 | core↔storage layering inversion | Medium | **Fixed** | `CaseWorkspace` moved to `storage/workspace.py`; core imports pure |
 | A1/R-A1-3 | Two `SCHEMA_VERSION` sources of truth | Medium | **Fixed** | Single definition in `tracefield/__init__.py`; `database.py` imports it |
 | A1/R-A1-4 | Catalogue path breaks under wheel install | High (was Medium) | **Fixed (Phase 7, 2026-10-23)** | `data/catalog` now force-included inside the wheel (`pyproject.toml`); path resolves package-relative with repo fallback. Fresh-venv install: `tools status/search/show` + `catalog validate` all exit 0; audit G7 resolved |
-| A1/R-A1-5 | Untyped `Relation` endpoints allow cross-case edges | Medium | **Mitigated** | App-level checks + DB trigger enforce evidence↔source case match; relation endpoint validation is app-level only — **open** for DB-level FK |
+| A1/R-A1-5 | Untyped `Relation` endpoints allow cross-case edges | Medium | **Fixed (Phase 11, 2026-10-27)** | Schema-v2 DB triggers (`trg_relations_integrity_{ins,upd}`) refuse missing/cross-case endpoints at write time (UPDATE covered too), plus a same-case JSON guard on `evidence_ids`; app-level checks unchanged. Raw-SQL tamper tests pin every refusal shape. Note: triggers guard NEW writes only — pre-v2 rows are not retro-validated (documented in the migration) |
 | A2/R-A2-2 | TUI `self.cases[0]`-style view scoping | Medium | **Fixed (Phase 10, 2026-10-25)** | Views scope rows to the active case, and the case picker never auto-selects with >1 case. Durable proof: `tests/tui/test_journeys.py::TestCaseModel::test_two_case_isolation_across_views_and_reload` (Evidence/Claims/Runs each show only case-B rows after selection, navigation, and a full app reload; case-A rows never leak) + `test_two_cases_never_guess_and_picker_works` (no auto-pick + Evidence isolation). Spec: `TUI_INTERACTION_SPEC.md` TS-1 / P-TS-4 |
 | A2/R-A2-3 | Synchronous repo queries hitch in render path | Medium | **Open** | No worker offload yet; acceptable at current data volumes |
 | A2/R-A2-4 | TUI never closed DB (WAL linger) | Low | **Fixed** | `_shutdown` override closes connection (see DECISIONS D8) |
 | A3/R-A3-3 | `_is_blocked_ip` enumerated checks missed ranges | Medium | **Fixed** | Explicit deny list; measured Python `is_global` quirks documented |
-| A3/R-A3-4 | Catalogue staleness has no enforcement | Medium | **Open** | `last_checked`/`health_result` remain schema-only; no health-check job (post-P0) |
+| A3/R-A3-4 | Catalogue staleness has no enforcement | Medium | **Accepted (decided, Phase 11, 2026-10-27)** | Decision D22: **no automated health job** — upstream re-verification is operator-manual; `catalog stale [--max-age-days N]` shipped as a read-only freshness listing (overdue + unparseable dates reported as unknown, never guessed; explicit "not a health verdict" wording; no network, no writes). `last_checked`/`health_result` columns retained in schema v2 for that workflow |
 | A3/R-A3-5 | `Catalog.load` silently collapses duplicate IDs | Medium | **Fixed** | Duplicates retained and reported by `validate()` |
 | A4/R-A4-4 | Whole-case cluster count fired caveats on every claim | Medium | **Fixed** | Per-claim cluster membership computed from supporting origins |
-| A4/R-A4-5 | Assertion `evidence_ids` TEXT column, no dangling check | Medium | **Open** | Assertions still unwired at CLI level for creation-with-refs; guarded where used |
+| A4/R-A4-5 | Assertion `evidence_ids` TEXT column, no dangling check | Medium | **Fixed (Phase 11, 2026-10-27)** | `assertion add/list/review` CLI wired over `AssertionRepo` (previously creation was impossible); assertions gain the same schema-v2 DB guard (`trg_assertions_integrity_{ins,upd}`): `claim_id` same-case, `evidence_ids` JSON same-case |
 | A4/R-A4-6 | `attach_file` read whole file into memory | Medium | **Fixed** | Streamed copy (`shutil.copyfileobj`); clustering size guard with explicit skip |
-| C1/R-C1-2 | Report defensibility gaps (no generated_at/version/author) | Medium | **Mitigated** | Report carries `generated_at`, tool version, rule version, caveats; author/corrections section **open** |
+| C1/R-C1-2 | Report defensibility gaps (no generated_at/version/author) | Medium | **Mitigated** | Report carries `generated_at`, tool version, rule version, caveats. Phase 11 (2026-10-27) shipped the identity machinery: durable report_id/revision/supersession register + corrections carried forward along the lineage (schema v2, report schema v3). **Still open:** the author string itself is user-gated (FS-17); until set, reports say `author not set` plainly |
 | C1/R-C1-4 | Absolute paths leak filesystem structure in reports | Medium | **Mitigated** | Report renders source locators through `s()`; path redaction beyond that is **open** |
-| C1/R-C1-5 | Event digest omits `tool_fingerprint`; `case-delete` appends no event | Medium | **Mitigated** | Delete appends an event; `occurred_at` **is** bound (audit F4; earlier note was stale); `tool_fingerprint` deferred to schema v2 to avoid breaking existing chains |
+| C1/R-C1-5 | Event digest omits `tool_fingerprint`; `case-delete` appends no event | Medium | **Mitigated** | Delete appends an event; `occurred_at` **is** bound (audit F4; earlier note was stale); `tool_fingerprint` remains unbound (FS-24, P3 — not part of the Phase 11 schema v2, which was additive tables+triggers to avoid breaking existing chains) |
 | C2/R-C2-3 | Near-dup detection failed both directions; Latin-only | Medium | **Fixed** | origin-r3 containment + Unicode tokenization; fixtures pin both |
 | C2/R-C2-4 | Contradiction asserted while unreviewed support sat in case | Medium | **Fixed** | Decision table requires *confirmed* contradict for CONTRADICTED (D4) |
 | C3/R-C3-3 | `username.py` skipped URL policy validation on redirects | Medium | **Fixed** | Redirect targets re-enter policy validation |
-| C3/R-C3-5 | Malformed User-Agent (`tracefield/0.1 (+https://)`) | Low | **Open** | Cosmetic; needs a real contact URL before public release |
+| C3/R-C3-5 | User-Agent in `username.py` lacked a real contact route | Low | **Fixed (Phase 11, 2026-10-27)** | UA now carries the project's own contact route (`tracefield/0.1 (+https://github.com/killerdasher/TRACEFIELD)`), matching `fetch.py`. (The 2026-10-19 description cited the malformed `(+https://)` form, which only the username path ever had.) If a different contact address is later preferred, it is a one-line change |
 | C4/R-C4-3 | No perceptual hashing (image duplicate analysis absent) | Medium | **Open** | Planned post-P0; catalogue already records the capability gap honestly |
 | C4/R-C4-4 | Signature table false positives can mislabel exhibits | Low | **Mitigated** | Signature table emits "weak/ambiguous" markers; caveat text present |
 
@@ -66,6 +70,11 @@
 | B1/R5 | Star-count envy (Sherlock 94k) | — | **Accepted** | No star comparisons in any project doc |
 
 ## Emerging (this implementation pass)
+
+> Rows below record the **audit-time state (2026-10-19)** and are re-visited in
+> the phase reports; several were already fixed in Phases 6–10 (see
+> `FINAL_BUILD_SPEC.md` milestone statuses). Phase 11 (2026-10-27) addressed
+> the rows the detailed tables above now mark as dated.
 
 | Risk | Sev | Status | Notes |
 |---|---|---|---|

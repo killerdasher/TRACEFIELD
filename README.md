@@ -67,9 +67,12 @@ tracefield case-export demo --output ./demo-export
 tracefield case-verify ./demo-export    # anyone can re-check the bundle
 ```
 
-Network features are doubly opt-in (`TRACEFIELD_ALLOW_NETWORK=1` **and** an
-explicit `--fetch` flag); the SSRF policy is re-validated per request and per
-redirect, and connections are pinned to pre-validated addresses.
+Network features are opt-in and authorized: `TRACEFIELD_ALLOW_NETWORK=1`
+**and** an explicit `--fetch` flag, **plus** a recorded scope grant for the
+case (`tracefield case authorize <case> --scope "<text>" --authorized-by
+"<name>"` — a hash-chained ledger; `case scope` shows it). The SSRF policy is
+re-validated per request and per redirect, and connections are pinned to
+pre-validated addresses.
 
 ### Synthetic demonstration transcript
 
@@ -102,13 +105,15 @@ manifest OK — N files re-hashed, all intact
 | Claims, relations, analyst review, `analyze claim` | **implemented** | Decision table pinned by tests; `RULE_VERSION` recorded |
 | Origin clustering (containment r3) | **implemented** | Ordered k=3/4/5 shingles; advisory `related_text` edges |
 | Contradiction candidates (dates/digests/quantities) | **implemented** | Always severity `candidate`; requires review |
-| Reports (Markdown/JSON/HTML) with caveats + versions | **implemented** | HTML is self-contained, fully escaped, no external resources |
+| Reports (Markdown/JSON/HTML) with caveats + versions | **implemented** | HTML is self-contained, fully escaped, no external resources; reports carry a durable identity (report_id/revision/supersedes) and corrections travel with the lineage; `case-export --recipient` records shipments (dissemination register) |
+| Report corrections & history | **implemented** | `report-correct` appends corrections (never silent rewrites); `report-history` lists revisions, corrections, recorded shipments; recipients of prior revisions are notified by the operator — the register makes it traceable, nothing is automated |
+| Scope authorization ledger | **implemented** | `case authorize/case scope`; `source add --fetch` requires an active recorded grant; records authority, does not grant it |
 | `hash` / `inspect [--deep]` / `ocr` | **implemented** | Backends optional; UNAVAILABLE is honest |
-| `fetch --fetch` (SSRF-guarded) / `username check` | **implemented** | Opt-in; soft-404 markers; 1 req/s; no bulk mode |
+| `fetch --fetch` (SSRF-guarded) / `username check` | **implemented** | Fetch: opt-in + recorded scope grant; username checks: env-gated, soft-404 markers, 1 req/s, no bulk mode |
 | Tool catalogue + tiered `tools status` | **implemented** | 2,264 inert records; counts never padded |
 | TUI | **experimental** | Keyboard workflow tested headless; active-case model + `c` case picker |
 | Structured logging (JSONL audit) | **implemented** | `command`/`fail`/`unhandled` events; redacted, capped, `0600` |
-| Health-check job for catalogue rows | **planned** | Schema fields exist, no job |
+| Health-check job for catalogue rows | **not built, by decision** | `catalog stale` lists freshness (overdue/unparseable dates), explicitly not a health verdict; upstream verification is operator-manual |
 | Perceptual hashing for images | **planned** | |
 | Plugin/adapter entry points | **implemented** | Typed `ToolAdapter` boundary in `src/tracefield/adapters.py`; `integration_state=integrated` requires an adapter proven end-to-end; proposal flow in CONTRIBUTING |
 | Retention / erasure workflow | **planned** | |
@@ -190,7 +195,9 @@ provenance and licence rules: `data/catalog/source-manifest.json` and
 - OCR output is machine-derived, not verified transcription.
 - "A public handle exists" is not identity attribution.
 - TRACEFIELD does not grant legal authorization to investigate anyone; the
-  operator is responsible for scope, ToS, and law. There is no scope ledger.
+  operator is responsible for scope, ToS, and law. The scope ledger records
+  decisions and gates fetches — it makes no operation lawful and cannot
+  verify any authority.
 - GPS-bearing files are *listed* in `SENSITIVE_METADATA.txt` on export (key
   names, not values); binaries are never silently rewritten — scrubbing before
   distribution is the operator's job.

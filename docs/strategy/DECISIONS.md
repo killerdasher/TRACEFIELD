@@ -269,3 +269,77 @@ to an external backend. Design commitments, test-pinned:
   Observation referencing it; interpretation stays a reviewable layer.
   Reports now carry `observations` (schema v2, additive) so raw returns
   surface without being promoted to findings.
+
+## D20 — Scope authorization is a ledger, enforced at the fetch gate
+
+`case authorize <case> --scope "<text>" --authorized-by "<name>"` (optionally
+`--revoke`) records collection-authority decisions as **hash-chained
+analysis_events** (`scope.authorize` / `scope.revoke`) — the same
+tamper-evident chain `case verify` checks. No separate authorization table:
+a decision is an event, sharing one integrity mechanism.
+
+- **Latest decision wins**: `case scope` (read view: declared scope, ledger
+  entries, active or not) and the gate both read the most recent
+  scope event. A later revoke blocks; the ledger cannot hold two
+  simultaneous states.
+- **Enforcement is at the collection boundary**: `source add --fetch` exits
+  `4` (network-blocked) with an actionable `case authorize` hint unless the
+  latest decision is an active grant. The existing global
+  `TRACEFIELD_ALLOW_NETWORK=1` opt-in remains, but is no longer collection
+  authority by itself: it enables the network stack; the ledger authorizes
+  the collection.
+- **Soft host advisory, not semantic matching**: scope text is free-form,
+  so when a fetch target's host is not mentioned in any recorded grant text,
+  the CLI prints a warning that names the host and tells the operator to
+  confirm — it does not refuse. Claims of semantic scope enforcement stay
+  out of the product.
+- **Username checks deliberately stay env-gated** (`TRACEFIELD_USERNAME_CHECK`)
+  and are NOT behind the case ledger: `username check` is a public-profile
+  existence probe run against a curated allowlist, not case collection of
+  material; folding it into per-case authorization would blur what the
+  ledger warrants. Recorded here so the asymmetry is a decision, not an
+  oversight. Rationale and residual limits are stated in OOVS `-01` scope notes.
+
+## D21 — Report identity: one registered revision per rendered document
+
+Data schema v2 (additive-only migration: `case_reports`, `report_corrections`,
+`dissemination` + DB integrity triggers; no column or data changes) carries
+the dissemination-control machinery (OOVS-09):
+
+- **One identity per document**: `ReportRepo.register()` mints revision N and
+  links it (supersedes N-1, superseded_by back-filled). `case-export` builds
+  **one registered payload and renders `report.json` + `report.md` from that
+  same identity** — registering per format would mint two revisions for one
+  shipped document, a false trail. `report` (CLI) registers by default;
+  `--no-register` stays available and unregistered payloads honestly read
+  `revision: "unregistered"` / empty `report_id` rather than faking one.
+- **Corrections are appended, never rewritten**, addressed at a specific
+  report id, and travel **forward with the lineage** (`corrections_for_chain`
+  includes corrections against ancestors): a re-render never silently drops a
+  known error. Each correction also appends a hash-chained
+  `report.correction` event.
+- **Shipments are recorded, not automated**: `case-export --recipient`
+  writes a dissemination row (report id, recipient, time) and the export
+  README names the exact revision and the duty to notify prior recipients after
+  a correction. Nothing sends anything; the register makes the notification
+  traceable (`report-history`).
+- **Verdict discipline**: OOVS-09 stays `FAIL` until the author identity
+  string exists (user decision, FS-17) — mechanism shipped, verdict held,
+  per the mapping's promotion policy.
+
+## D22 — Catalogue verification is operator-manual; freshness listing, not a health job
+
+FS-20 asked for a health-check job wired to `last_checked` **or** the columns
+dropped before schema v2. Decision: **neither automated checking nor dropping**
+— the catalogue is inert data, and a shipped "health" label is exactly the
+kind of unverifiable claim the project refuses to make. Instead:
+
+- `catalog stale [--max-age-days N]` lists entries whose `last_checked`
+  predates the cutoff, plus entries with unparseable or missing dates,
+  reported as `unknown` — unknown freshness is **reported, never guessed**.
+- The command states plainly that a stale listing is **not a health verdict**
+  and never contacts upstream. Writes are zero.
+- Schema v2 retains `last_checked`/`health_result` as inert columns for the
+  operator-manual workflow; `health_result` remains unclaimed by the tool.
+- Consequence accepted: no automated staleness detection beyond the listing.
+  Risk-register row A3/R-A3-4 carries the residual as **Accepted (decided)**.

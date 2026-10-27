@@ -80,3 +80,41 @@ Initial implementation. Shipped across the first build sessions,
   redacted exports verify.
 - Redaction patterns rewritten to stop corrupting adjacent values
   (`password: hunter2` → `password: [REDACTED]`, not `[REDACTED]word`).
+
+### Added (Phase 11, 2026-10-27)
+
+- **Data schema v2** (additive-only migration from v1; no data changes):
+  report-identity register (`case_reports` with revision/supersedes chain),
+  correction register (`report_corrections`), dissemination register
+  (`dissemination`), and DB-level referential integrity triggers — relation
+  endpoints must exist **in the same case** (INSERT and UPDATE), and
+  `evidence_ids` must be valid JSON listing same-case evidence; assertions
+  get the same claim/evidence guards. New writes only; pre-v2 rows are not
+  retro-validated (documented in the migration).
+- **Report identity & dissemination (OOVS-09 mechanism)**: every rendered
+  report can carry a durable `report_id` + revision; revisions supersede
+  explicitly; corrections are appended (never silently rewritten) and travel
+  forward with the lineage into the next render; `report-correct` and
+  `report-history` operate the register; report schema v3 (additive).
+  `case-export` renders `report.json` + `report.md` from ONE registered
+  identity and `--recipient` records the shipment in the register with
+  recipient-notification duty in the export README.
+- **Scope authorization ledger (OOVS-01)**: `case authorize --scope
+  --authorized-by [--revoke]` records collection-authority decisions as
+  hash-chained analysis events; `case scope` reads the ledger;
+  `source add --fetch` fails (exit 4, actionable hint) unless the latest
+  decision is an active grant — the network env opt-in alone is no longer
+  collection authority; a host absent from the recorded scope text draws a
+  soft advisory.
+- **Assertion creation path**: `assertion add/list/review` (previously
+  assertions could not be created from any command surface); same-case
+  claim/evidence validation CLI-side, DB-triggered backstop.
+- **`catalog stale [--max-age-days N]`**: read-only freshness listing of
+  overdue/unparseable `last_checked` dates (explicitly NOT a health verdict;
+  decided FS-20 — verification is operator-manual, no automated job).
+
+### Fixed (Phase 11, 2026-10-27)
+
+- `username.py` User-Agent lacked a contact route; it now carries the
+  project's own repo contact route, matching `fetch.py`
+  (`tracefield/0.1 (+https://github.com/killerdasher/TRACEFIELD)`).

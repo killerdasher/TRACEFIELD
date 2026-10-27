@@ -55,6 +55,21 @@ it — live-network behaviour is exercised manually and via fixtures).
 > (`PHASE_10_CI_REPAIR_AND_RELEASE_TRIAGE.md`) records the run that was
 > watched.
 
+> **Update (2026-10-27, Phase 11: scope, report identity, DB integrity).**
+> Five implementation commits on `main` (schema v2 migration; report
+> identity/corrections/dissemination register; scope authorization ledger
+> with fetch gate; assertion CLI; `catalog stale` + UA contact route).
+> Local gates on the HEAD commit: **pytest 321 passed / 0 failed / 0
+> skipped on each of Python 3.11, 3.12, 3.13** (`-m "not network"`),
+> `ruff format`/`ruff check` clean, `mypy src` strict clean (38 files).
+> Scope enforcement changed behaviour: `source add --fetch` now additionally
+> requires a recorded scope grant (`case authorize`); existing tests were
+> updated to grant first — SSRF coverage unchanged. OOVS mapping: `-01`
+> promoted `NOT_ASSESSED` → `PASS (scoped)` with ledger/gate evidence,
+> `-09` verdict held `FAIL` (mechanism shipped; author string + acceptance
+> test still outstanding). Details and commit list:
+> `PHASE_11_SCOPE_REPORT_INTEGRITY.md`.
+
 ## Codebase size (measured)
 
 | Area | Files | Lines |

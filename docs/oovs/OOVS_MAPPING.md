@@ -6,12 +6,19 @@ Normative text: [`oovs/v0.1/standard.md`](https://github.com/OWASP/OWASP-Open-So
 structured requirements: [`requirements.json`](https://github.com/OWASP/OWASP-Open-Source-Intelligence-Standard/blob/main/oovs/v0.1/requirements.json);
 acceptance tests: [`tests.json`](https://github.com/OWASP/OWASP-Open-Source-Intelligence-Standard/blob/main/oovs/v0.1/tests.json).
 
-**Assessed product:** TRACEFIELD 0.1.0 (pre-first-release), data schema v1.
+**Assessed product:** TRACEFIELD 0.1.0 (pre-first-release), data schema v2
+(additive migration from v1, 2026-10-27).
 **Assessment date:** 2026-10-19.
+**Re-verified:** 2026-10-27 after Phase 11 (scope/authorization ledger, report
+identity/corrections/dissemination register, schema-v2 DB integrity triggers,
+assertion CLI, catalogue freshness listing) — 321 tests passing
+(`pytest -m "not network"`, 3.13; re-run on 3.11/3.12 before push).
 **Rule versions in scope:** `assess-r2` (claim assessment), `contra-r2`
-(contradiction detection), `origin-r3` (origin clustering), report schema v2
-(v2 is additive to the assessed v1: adds generated_at/tool/document
-dissemination block, 2026-10-19; v1 fields unchanged).
+(contradiction detection), `origin-r3` (origin clustering), report schema v3
+(v2 was additive to assessed v1: added generated_at/tool/document
+dissemination block, 2026-10-19; v3 is additive to v2: the document block
+gains durable report identity — report_id/revision/supersedes — and
+correction records, 2026-10-27; v1/v2 fields unchanged).
 **Assessment type:** maintainer self-assessment against the OOVS requirement
 objectives, evidenced by source and the automated test suite (207 tests passing
 at assessment time, re-verified 2026-10-19: `tests/unit`, `tests/integration`,
@@ -43,7 +50,7 @@ not reproduced here (the standard is CC BY-SA 4.0 —
 
 | ID | Requirement | Status |
 |---|---|---|
-| `OOVS-v0.1.0-01` | Authorised purpose and proportionality | `NOT_ASSESSED` |
+| `OOVS-v0.1.0-01` | Authorised purpose and proportionality | `PASS` (scoped) |
 | `OOVS-v0.1.0-02` | Collection boundary and data minimisation | `PASS` (scoped) |
 | `OOVS-v0.1.0-03` | Source provenance and integrity | `PASS` (scoped) |
 | `OOVS-v0.1.0-04` | Source and claim assessment | `PASS` (scoped) |
@@ -54,26 +61,45 @@ not reproduced here (the standard is CC BY-SA 4.0 —
 | `OOVS-v0.1.0-09` | Dissemination and action controls | `FAIL` |
 | `OOVS-v0.1.0-10` | Governance, audit, and improvement | `NOT_ASSESSED` |
 
-7 `PASS` (each scoped), 1 `FAIL`, 2 `NOT_ASSESSED`, 0 `NOT_APPLICABLE`.
+8 `PASS` (each scoped), 1 `FAIL`, 1 `NOT_ASSESSED`, 0 `NOT_APPLICABLE`.
 
 ## Requirement detail
 
-### `OOVS-v0.1.0-01` — Authorised purpose and proportionality — `NOT_ASSESSED`
+### `OOVS-v0.1.0-01` — Authorised purpose and proportionality — `PASS` (scoped)
 
-**What the product has:** `case create` records a declared purpose and scope
-(`src/tracefield/cli/main.py:306-307`); collection commands operate only on the
-case the operator selected; there is no bulk-collection mode anywhere in the
-CLI.
+**Evidence (re-mapped 2026-10-27 after Phase 11):**
+- `case create` records a declared purpose and scope
+  (`src/tracefield/cli/main.py`); collection commands operate only on the
+  case the operator selected; there is no bulk-collection mode anywhere in
+  the CLI.
+- **Scope/authorization ledger**: `case authorize <case> --scope "<text>"
+  --authorized-by "<name>"` records a collection-authority decision
+  (optionally `--revoke` to withdraw) as a **hash-chained analysis event**
+  (`scope.authorize`/`scope.revoke` in `analysis_events`; tamper-evident by
+  the same chain `case verify` checks). `case scope <case>` is the read
+  view (declared scope, ledger entries, active or not).
+- **Enforcement**: `source add --fetch` fails closed (exit 4, with an
+  actionable `case authorize` hint) unless the **latest** recorded decision
+  for that case is an active grant — the global
+  `TRACEFIELD_ALLOW_NETWORK=1` opt-in alone is not collection authority.
+  A later revoke blocks again. Tests: `tests/integration/test_cli.py::TestScopeLedger`
+  (gate blocks with hint; grant-then-fetch passes the ledger and fails on
+  the URL policy instead — via an intentionally unresolvable `.invalid`
+  host, so no network is contacted; revoke re-blocks; host advisory;
+  grant validation; ledger read view).
 
-**Why not `PASS`:** recording a purpose is necessary but not sufficient —
-nothing in the workflow *gates* collection on the declared scope (no scope
-ledger, no proportionality check before a fetch or username query, no
-authorization record beyond free-text fields). The official acceptance test was
-not run.
-
-**Gap to close:** enforce scope at collection time (reject or warn when a
-command targets material outside the declared scope) and record an
-authorization decision object, then re-map.
+**Scope limits / honest caveats:**
+- Authorization is recorded as *who decided what collection* — it does not
+  make an operation lawful, and the tool cannot verify a legal authority
+  (operator responsibility, stated in README non-guarantees).
+- The recorded scope text is free-form; the host-vs-scope check (`source
+  add --fetch`) is a **soft advisory** when a target host is not mentioned,
+  not a semantic proportionality check. There is no proportionality scoring.
+- Username checks (`username check`) deliberately stay env-gated only
+  (`TRACEFIELD_USERNAME_CHECK`, decision D20): they are public-profile
+  existence probes against a curated allowlist, not case collection;
+  proportionality for them is procedural.
+- The official acceptance test was not run.
 
 ### `OOVS-v0.1.0-02` — Collection boundary and data minimisation — `PASS` (scoped)
 
@@ -98,8 +124,9 @@ authorization decision object, then re-map.
   retention/erasure job**; deletion is operator-driven (`case delete`,
   `src/tracefield/cli/main.py:1582`).
 - Data minimisation depends on the operator attaching only what the case needs;
-  the tool does not auto-harvest, but it also does not refuse over-collection
-  against the declared scope (see `-01`).
+  the tool does not auto-harvest; scope enforcement is the Phase 11
+  authorization ledger plus a soft host advisory (`-01`), not a semantic
+  refusal of over-collection.
 
 ### `OOVS-v0.1.0-03` — Source provenance and integrity — `PASS` (scoped)
 
@@ -217,23 +244,42 @@ is ever added, this entry must be re-assessed before release.
 
 ### `OOVS-v0.1.0-09` — Dissemination and action controls — `FAIL`
 
-**What the product has:**
+**What the product has (mechanism shipped Phase 11, 2026-10-27; verdict held
+— see below):**
 - Caveats and limitations travel with the report to the point of action
   (global + per-source + per-assessment caveats).
 - Redaction of secrets in exports; post-redaction integrity manifest so a
   recipient can verify their copy (`src/tracefield/reporting/export.py`).
 - Reports state provenance of the report itself (generated-by, rule versions,
   schema version) and non-guarantees.
+- **Report identity register** (data schema v2): every rendered report gets a
+  durable `report_id` + revision; revision N supersedes N-1 with the chain
+  (`supersedes`/`superseded_by`) recorded. Corrections are appended, never
+  silently rewritten, are addressed at a specific report id (`report-correct`),
+  and travel **forward with the lineage** — a re-render carries every
+  correction against the report and its ancestors (`report schema v3`).
+- **Dissemination register**: `case-export --recipient <name>` records which
+  report revision shipped to which recipient and when; `report-history`
+  displays the chain (revisions, corrections, recorded shipments). Exports
+  name their exact report id/revision in `EXPORT_README.txt`.
 
-**Why `FAIL`:** the requirement's correction obligation — a correction reaching
-everyone who received the product — has **no mechanism** in TRACEFIELD today.
-There is no release/recipient register, no re-issue workflow, no "this report
-was superseded" marker carried forward, and no way to notify prior recipients.
-The first half (caveats travel) is implemented; the second half (corrections
-propagate) is absent. This is the clearest unmet requirement.
+**Why the verdict stays `FAIL` (held, not promoted):**
+1. **Correction reachability is not closed-loop**: the register makes "who
+   received which revision" answerable, but notifying prior recipients of a
+   correction remains an operator action — nothing in the tool automatically
+   reaches or confirms any recipient.
+2. **No author identity is configured**: the dissemination document must say
+   who asserts it; reports currently state `author not set` plainly (FS-17
+   author string is user-gated). A self-assessment cannot claim this
+   control while its identity half is an empty string.
+3. The official acceptance test was not run.
 
-**Gap to close:** report revision IDs + a supersession record on cases, and an
-export manifest that lists which recipients/exports were issued which revision.
+**Gap to close (in order):** set the author identity string (user decision),
+re-verify the register against the requirement's own tests, then re-verdict.
+Per mapping policy below, promotion from `FAIL` also requires a test that
+would fail if the mechanism regressed — the Phase 11 identity/correction
+tests provide exactly that tripwire; items 1–2 above are what the verdict
+rests on.
 
 ### `OOVS-v0.1.0-10` — Governance, audit, and improvement — `NOT_ASSESSED`
 
