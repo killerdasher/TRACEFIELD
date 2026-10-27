@@ -13,6 +13,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NoReturn
+from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
@@ -28,6 +29,7 @@ from tracefield import __version__
 from tracefield.config import Settings, load_settings
 from tracefield.core.domain import (
     AccessMethod,
+    AnalysisEvent,
     Case,
     Claim,
     Observation,
@@ -154,10 +156,9 @@ def resolve_case(repo: CaseRepo, ref: str) -> Case:
 
 def _append_event(
     ws: CaseWorkspace, case_id: str, action: str, inputs: list[str], outputs: list[str]
-) -> None:
+) -> AnalysisEvent:
     prev = ws.events.last_digest(case_id)
     occurred = utcnow()
-    from tracefield.core.domain import AnalysisEvent
 
     ev = AnalysisEvent(
         case_id=case_id,
@@ -170,6 +171,7 @@ def _append_event(
     )
     ev.digest = compute_event_digest(ev.action, ev.inputs, ev.outputs, prev, occurred)
     ws.events.append(ev)
+    return ev
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +346,139 @@ def case_create(
         db.close()
 
 
+_SCOPE_ACTIONS = ("scope.authorize", "scope.revoke")
+
+
+@case_app.command("authorize")
+def case_authorize(
+    case: str = typer.Argument(..., help="Case ID or title."),
+    scope: str = typer.Option("", "--scope", help="Authorized collection scope text."),
+    authorized_by: str = typer.Option(..., "--authorized-by", help="Who decided (name/role)."),
+    revoke: bool = typer.Option(
+        False,
+        "--revoke",
+        help="Record withdrawal of the authorization instead of a grant.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Record a scope authorization decision for this case (OOVS-01).
+
+    The decision is stored as a hash-chained analysis event — tamper-evident
+    by construction. Network collection (`source add --fetch`) requires the
+    LATEST decision for the case to be an active grant.
+    """
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        if not authorized_by.strip():
+            fail("--authorized-by must name the human authority for this decision", EXIT_USAGE)
+        if revoke:
+            action = "scope.revoke"
+            scope_text = scope.strip()
+            inputs = [scope_text] if scope_text else []
+        else:
+            action = "scope.authorize"
+            if not scope.strip():
+                fail(
+                    "a grant needs --scope text (an authorization without scope is empty)",
+                    EXIT_USAGE,
+                )
+            # The declared case scope and the authorization are separate
+            # things: this event records what collection was authorized now.
+            scope_text = scope.strip()
+            inputs = [scope_text]
+        ws = CaseWorkspace(settings.cases_root, db)
+        ev = _append_event(ws, case_obj.id, action, inputs, [authorized_by.strip()])
+        payload = {
+            "case_id": case_obj.id,
+            "action": action,
+            "scope": scope_text,
+            "authorized_by": authorized_by.strip(),
+            "recorded_at": ev.occurred_at,
+            "event_id": ev.id,
+        }
+
+        def render(p: dict[str, Any]) -> None:
+            verb = "[yellow]revoked[/yellow]" if revoke else "[green]authorized[/green]"
+            console.print(f"{verb} scope for case [bold]{p['case_id']}[/bold]")
+            if p["scope"]:
+                console.print(f"  scope:   {s(p['scope'])}")
+            console.print(f"  by:      {s(p['authorized_by'], 120)}")
+            console.print(f"  at:      {p['recorded_at']}")
+            console.print(
+                "[dim]records the who and what of collection authority; "
+                "entries are hash-chained analysis events (case scope lists them)[/dim]"
+            )
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
+@case_app.command("scope")
+def case_scope(
+    ref: str = typer.Argument(..., help="Case ID or title."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Show a case's declared scope and its authorization ledger (read view)."""
+    from tracefield.storage.repositories import EventRepo
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), ref)
+        events = EventRepo(db).list_for_case(case_obj.id)
+        entries = [
+            {
+                "action": "revoke" if ev.action == "scope.revoke" else "grant",
+                "scope": ev.inputs[0] if ev.inputs else "",
+                "authorized_by": ev.outputs[0] if ev.outputs else "",
+                "recorded_at": ev.occurred_at,
+                "event_id": ev.id,
+            }
+            for ev in events
+            if ev.action in _SCOPE_ACTIONS
+        ]
+        last = EventRepo(db).latest_action(case_obj.id, _SCOPE_ACTIONS)
+        payload = {
+            "case_id": case_obj.id,
+            "declared_scope": case_obj.scope,
+            "active": bool(last is not None and last.action == "scope.authorize"),
+            "entries": entries,
+        }
+
+        def render(p: dict[str, Any]) -> None:
+            console.print(f"case: [bold]{p['case_id']}[/bold]")
+            console.print(f"declared scope: {s(p['declared_scope']) or '(none)'}")
+            state = "[green]active[/green]" if p["active"] else "[red]not active[/red]"
+            console.print(f"authorization: {state}")
+            if not p["entries"]:
+                console.print(
+                    "[dim]no decisions recorded — grant one with: "
+                    'tracefield case authorize <case> --scope "<text>" '
+                    '--authorized-by "<name>"[/dim]'
+                )
+                return
+            table = Table(title="authorization ledger")
+            table.add_column("recorded")
+            table.add_column("decision")
+            table.add_column("scope")
+            table.add_column("by")
+            for e in p["entries"]:
+                table.add_row(
+                    e["recorded_at"],
+                    e["action"],
+                    s(e["scope"], 120) if e["scope"] else "—",
+                    s(e["authorized_by"], 80),
+                )
+            console.print(table)
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
 @case_app.command("list")
 def case_list(
     as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
@@ -465,6 +600,33 @@ def source_add(
                     "to permit fetches (URLs are still validated per-request)",
                     EXIT_NETWORK_BLOCKED,
                 )
+            # Scope ledger (OOVS-01): network collection needs an ACTIVE,
+            # recorded authorization for THIS case — not just a global
+            # opt-in. The latest decision wins: a later revoke blocks.
+            from tracefield.storage.repositories import EventRepo
+
+            last_scope = EventRepo(db).latest_action(case_obj.id, _SCOPE_ACTIONS)
+            if last_scope is None or last_scope.action != "scope.authorize":
+                fail(
+                    "fetching is blocked: no active scope authorization for this case. "
+                    "Record the collection grant with: "
+                    f'tracefield case authorize {case_obj.id} --scope "<collect scope text>" '
+                    '--authorized-by "<name>" (see: tracefield case scope)',
+                    EXIT_NETWORK_BLOCKED,
+                )
+            host = urlparse(locator).hostname or ""
+            if host:
+                authorized_texts = [
+                    ev.inputs[0]
+                    for ev in EventRepo(db).list_for_case(case_obj.id)
+                    if ev.action == "scope.authorize" and ev.inputs
+                ]
+                if not any(host in text for text in authorized_texts):
+                    console.print(
+                        f"[yellow]warning:[/yellow] host {s(host, 200)} is not mentioned in "
+                        "the recorded scope text — confirm this fetch really is authorized "
+                        "(soft advisory; scope text is free-form)"
+                    )
             try:
                 source = fetch_source(source, settings)
             except UrlPolicyError as exc:

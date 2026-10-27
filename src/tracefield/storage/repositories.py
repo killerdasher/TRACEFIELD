@@ -679,6 +679,29 @@ class EventRepo:
         ).fetchone()
         return r["digest"] if r else ""
 
+    def latest_action(self, case_id: str, actions: tuple[str, ...]) -> AnalysisEvent | None:
+        """The most recently recorded event among ``actions`` (rowid order,
+        append-only). None when no such event was ever recorded."""
+        placeholders = ",".join("?" for _ in actions)
+        r = self.db.execute(
+            "SELECT * FROM analysis_events WHERE case_id=? AND action IN "
+            f"({placeholders}) ORDER BY rowid DESC LIMIT 1",
+            (case_id, *actions),
+        ).fetchone()
+        if r is None:
+            return None
+        return AnalysisEvent(
+            id=r["id"],
+            case_id=r["case_id"],
+            action=r["action"],
+            inputs=json.loads(r["inputs"]),
+            outputs=json.loads(r["outputs"]),
+            tool_fingerprint=r["tool_fingerprint"],
+            prev_digest=r["prev_digest"],
+            digest=r["digest"],
+            occurred_at=r["occurred_at"],
+        )
+
     def get(self, event_id: str) -> AnalysisEvent | None:
         r = self.db.execute("SELECT * FROM analysis_events WHERE id=?", (event_id,)).fetchone()
         if r is None:

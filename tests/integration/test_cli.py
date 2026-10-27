@@ -214,9 +214,22 @@ class TestNetworkPolicy:
     def test_private_fetch_blocked_even_with_optin(
         self, tf_home, monkeypatch, capsys, url: str
     ) -> None:
-        """SSRF guard runs per-request; opt-in does not disable it."""
+        """SSRF guard runs per-request; opt-in and a scope grant disable neither."""
         monkeypatch.setenv("TRACEFIELD_ALLOW_NETWORK", "1")
         run_cli_out(monkeypatch, capsys, ["case", "create", "ssrf", "--json"])
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "case",
+                "authorize",
+                "ssrf",
+                "--scope",
+                "ssrf blocklist fixture",
+                "--authorized-by",
+                "fixtures",
+            ],
+        )
         code, _, err = run_cli_out(
             monkeypatch,
             capsys,
@@ -454,3 +467,137 @@ class TestReportRegister:
             monkeypatch, capsys, ["report-correct", "rc-b", "--report", rid, "--note", "x"]
         )
         assert code == EXIT_NOT_FOUND and "not found in this case" in err
+
+
+class TestScopeLedger:
+    """Scope authorization ledger (OOVS-01): fetch requires an ACTIVE grant."""
+
+    DNS_DECOY = "https://lead-absent-4d21.invalid/"  # unresolvable: neverconnected
+
+    def test_fetch_with_optin_but_no_grant_is_exit_4(self, tf_home, monkeypatch, capsys) -> None:
+        """The global network opt-in alone is NOT collection authority."""
+        monkeypatch.setenv("TRACEFIELD_ALLOW_NETWORK", "1")
+        run_cli_out(monkeypatch, capsys, ["case", "create", "no-scope", "--json"])
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["source", "add", self.DNS_DECOY, "--case", "no-scope", "--fetch"],
+        )
+        assert code == EXIT_NETWORK_BLOCKED
+        assert "no active scope authorization" in err
+        assert "case authorize" in err  # actionable next step
+
+    def test_grant_then_fetch_passes_the_ledger_gate(self, tf_home, monkeypatch, capsys) -> None:
+        monkeypatch.setenv("TRACEFIELD_ALLOW_NETWORK", "1")
+        run_cli_out(monkeypatch, capsys, ["case", "create", "scoped", "--json"])
+        code, _, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "case",
+                "authorize",
+                "scoped",
+                "--scope",
+                "lead-absent-4d21.invalid fixture checks",
+                "--authorized-by",
+                "fixtures",
+                "--json",
+            ],
+        )
+        assert code == EXIT_OK
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["source", "add", self.DNS_DECOY, "--case", "scoped", "--fetch"],
+        )
+        # The gate passed; the fetch attempts and fails closed on the
+        # unresolvable host — proving the block was URL policy, not the ledger.
+        assert code == EXIT_NETWORK_BLOCKED
+        assert "no active scope authorization" not in err
+        assert "safety policy" in err or "rejected" in err.lower()
+
+    def test_revoke_after_grant_blocks_fetch_again(self, tf_home, monkeypatch, capsys) -> None:
+        monkeypatch.setenv("TRACEFIELD_ALLOW_NETWORK", "1")
+        run_cli_out(monkeypatch, capsys, ["case", "create", "revoked", "--json"])
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            ["case", "authorize", "revoked", "--scope", "s", "--authorized-by", "a"],
+        )
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            ["case", "authorize", "revoked", "--revoke", "--authorized-by", "a"],
+        )
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["source", "add", self.DNS_DECOY, "--case", "revoked", "--fetch"],
+        )
+        assert code == EXIT_NETWORK_BLOCKED
+        assert "no active scope authorization" in err
+
+    def test_host_absent_from_scope_text_warns_but_proceeds(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.setenv("TRACEFIELD_ALLOW_NETWORK", "1")
+        run_cli_out(monkeypatch, capsys, ["case", "create", "warn-host", "--json"])
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "case",
+                "authorize",
+                "warn-host",
+                "--scope",
+                "unrelated scope text",
+                "--authorized-by",
+                "a",
+            ],
+        )
+        code, out, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["source", "add", self.DNS_DECOY, "--case", "warn-host", "--fetch"],
+        )
+        assert code == EXIT_NETWORK_BLOCKED  # policy refusal (decoy host)
+        assert "not mentioned in the recorded scope" in " ".join(out.split())
+        assert "no active scope authorization" not in err  # ledger passed
+
+    def test_grant_without_scope_text_is_usage_3(self, tf_home, monkeypatch, capsys) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "empty-scope", "--json"])
+        code, _, err = run_cli_out(
+            monkeypatch, capsys, ["case", "authorize", "empty-scope", "--authorized-by", "a"]
+        )
+        assert code == EXIT_USAGE and "--scope" in err
+
+    def test_scope_read_view_and_entries(self, tf_home, monkeypatch, capsys) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "sview", "--json"])
+        _, out, _ = run_cli_out(monkeypatch, capsys, ["case", "scope", "sview", "--json"])
+        before = json.loads(out)
+        assert before["active"] is False and before["entries"] == []
+
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "case",
+                "authorize",
+                "sview",
+                "--scope",
+                "targets file a",
+                "--authorized-by",
+                "ops",
+                "--json",
+            ],
+        )
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            ["case", "authorize", "sview", "--revoke", "--authorized-by", "ops", "--json"],
+        )
+        _, out, _ = run_cli_out(monkeypatch, capsys, ["case", "scope", "sview", "--json"])
+        after = json.loads(out)
+        assert after["active"] is False  # latest decision is the revoke
+        assert [e["action"] for e in after["entries"]] == ["grant", "revoke"]
+        assert after["entries"][0]["authorized_by"] == "ops"
