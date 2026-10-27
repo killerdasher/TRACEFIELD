@@ -601,3 +601,104 @@ class TestScopeLedger:
         assert after["active"] is False  # latest decision is the revoke
         assert [e["action"] for e in after["entries"]] == ["grant", "revoke"]
         assert after["entries"][0]["authorized_by"] == "ops"
+
+
+class TestAssertions:
+    """Assertion creation path (A4/R-A4-5): previously read-only."""
+
+    def test_add_list_review(self, tf_home, monkeypatch, capsys) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "asr", "--json"])
+        _, out, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["claim", "add", "--case", "asr", "--text", "account reused", "--json"],
+        )
+        claim_id = json.loads(out)["id"]
+        code, out, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "assertion",
+                "add",
+                "--case",
+                "asr",
+                "--claim",
+                claim_id,
+                "--statement",
+                "the reuse supports attribution to operator account",
+                "--attribution",
+                "analyst A",
+                "--uncertainty",
+                "medium",
+                "--json",
+            ],
+        )
+        assert code == EXIT_OK
+        asr = json.loads(out)
+        assert asr["claim_id"] == claim_id and asr["review_state"] == "unreviewed"
+
+        _, out, _ = run_cli_out(
+            monkeypatch, capsys, ["assertion", "list", "--case", "asr", "--json"]
+        )
+        assert [a["id"] for a in json.loads(out)] == [asr["id"]]
+
+        code, _, _ = run_cli_out(
+            monkeypatch, capsys, ["assertion", "review", asr["id"], "--state", "confirmed"]
+        )
+        assert code == EXIT_OK
+        _, out, _ = run_cli_out(
+            monkeypatch, capsys, ["assertion", "list", "--case", "asr", "--json"]
+        )
+        assert json.loads(out)[0]["review_state"] == "confirmed"
+
+    def test_add_rejects_unknown_claim_and_evidence(self, tf_home, monkeypatch, capsys) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "asr-bad", "--json"])
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "assertion",
+                "add",
+                "--case",
+                "asr-bad",
+                "--claim",
+                "clm_nope",
+                "--statement",
+                "s",
+                "--json",
+            ],
+        )
+        assert code == EXIT_NOT_FOUND
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "assertion",
+                "add",
+                "--case",
+                "asr-bad",
+                "--evidence",
+                "ev_nope",
+                "--statement",
+                "s",
+                "--json",
+            ],
+        )
+        assert code == EXIT_NOT_FOUND and "evidence not found" in err
+
+    def test_empty_statement_is_usage_3(self, tf_home, monkeypatch, capsys) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "asr-empty", "--json"])
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "assertion",
+                "add",
+                "--case",
+                "asr-empty",
+                "--statement",
+                "  ",
+                "--json",
+            ],
+        )
+        assert code == EXIT_USAGE and "--statement" in err

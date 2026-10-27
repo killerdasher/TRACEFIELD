@@ -30,6 +30,7 @@ from tracefield.config import Settings, load_settings
 from tracefield.core.domain import (
     AccessMethod,
     AnalysisEvent,
+    Assertion,
     Case,
     Claim,
     Observation,
@@ -44,6 +45,7 @@ from tracefield.core.provenance import compute_event_digest
 from tracefield.security import sanitize_for_terminal
 from tracefield.storage import CaseWorkspace, Database, SchemaVersionError, StorageUnavailableError
 from tracefield.storage.repositories import (
+    AssertionRepo,
     CaseRepo,
     ClaimRepo,
     ClusterRepo,
@@ -77,6 +79,7 @@ claim_app = typer.Typer(help="Claims.", no_args_is_help=True)
 evidence_app = typer.Typer(help="Evidence attachment.", no_args_is_help=True)
 observation_app = typer.Typer(help="Raw tool observations (uninterpreted).", no_args_is_help=True)
 relation_app = typer.Typer(help="Relations between records.", no_args_is_help=True)
+assertion_app = typer.Typer(help="Evidence-linked analyst assertions.", no_args_is_help=True)
 analyze_app = typer.Typer(help="Analysis engine.", no_args_is_help=True)
 tools_app = typer.Typer(help="Tool catalogue (inert metadata).", no_args_is_help=True)
 catalog_app = typer.Typer(help="Catalogue import/validation.", no_args_is_help=True)
@@ -90,6 +93,7 @@ app.add_typer(claim_app, name="claim")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(observation_app, name="observation")
 app.add_typer(relation_app, name="relation")
+app.add_typer(assertion_app, name="assertion")
 app.add_typer(analyze_app, name="analyze")
 app.add_typer(tools_app, name="tools")
 app.add_typer(catalog_app, name="catalog")
@@ -1096,6 +1100,133 @@ def relation_list(
             table.add_column("review")
             for r in items:
                 table.add_row(r["id"], r["from_id"], r["relation"], r["to_id"], r["review_state"])
+            console.print(table)
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# assertions — evidence-linked analyst interpretations (A4/R-A4-5)
+# ---------------------------------------------------------------------------
+
+
+@assertion_app.command("add")
+def assertion_add(
+    case: str = typer.Option(..., "--case", help="Case ID or title."),
+    statement: str = typer.Option(..., "--statement", help="The asserted interpretation."),
+    claim: str = typer.Option("", "--claim", help="Claim this assertion interprets (optional)."),
+    evidence: str = typer.Option(
+        "",
+        "--evidence",
+        help="Comma-separated evidence IDs this interpretation relies on.",
+    ),
+    method: str = typer.Option("analyst", "--method", help="How this was asserted."),
+    attribution: str = typer.Option("", "--attribution", help="Asserted by whom."),
+    uncertainty: str = typer.Option("unknown", "--uncertainty", help="Analyst uncertainty note."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Record an evidence-linked assertion (human or machine interpretation)."""
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        if not statement.strip():
+            fail("--statement must not be empty", EXIT_USAGE)
+        claim_id = claim.strip()
+        if claim_id:
+            target = ClaimRepo(db).get(claim_id)
+            if target is None or target.case_id != case_obj.id:
+                fail(f"claim not found in this case: {claim_id!r}", EXIT_NOT_FOUND)
+        ev_ids = [e.strip() for e in evidence.split(",") if e.strip()]
+        for eid in ev_ids:
+            ev = EvidenceRepo(db).get(eid)
+            if ev is None or ev.case_id != case_obj.id:
+                fail(f"evidence not found in this case: {eid!r}", EXIT_NOT_FOUND)
+        asr = Assertion(
+            case_id=case_obj.id,
+            claim_id=claim_id,
+            statement=statement.strip(),
+            method=method.strip() or "analyst",
+            attribution=attribution.strip(),
+            uncertainty=uncertainty.strip() or "unknown",
+            review_state=ReviewState.UNREVIEWED,
+            evidence_ids=ev_ids,
+        )
+        AssertionRepo(db).add(asr)
+        ws = CaseWorkspace(settings.cases_root, db)
+        _append_event(ws, case_obj.id, "assertion.add", ([claim_id] if claim_id else []), [asr.id])
+
+        def render(a: dict[str, Any]) -> None:
+            console.print(f"[green]asserted[/green] [bold]{a['id']}[/bold]")
+            console.print(f"  statement: {s(a['statement'], 300)}")
+            if a.get("claim_id"):
+                console.print(f"  claim:     {a['claim_id']}")
+            if a["evidence_ids"]:
+                console.print(f"  evidence:  {', '.join(a['evidence_ids'])}")
+            console.print(
+                "[dim]unreviewed assertions are not evidence — review with: "
+                f"tracefield assertion review {a['id']} --state confirmed[/dim]"
+            )
+
+        emit(asr.model_dump(), as_json, render)
+    finally:
+        db.close()
+
+
+@assertion_app.command("review")
+def assertion_review(
+    assertion_id: str = typer.Argument(..., help="Assertion ID."),
+    state: str = typer.Option(
+        ...,
+        "--state",
+        help="confirmed|rejected|unresolved|unreviewed",
+    ),
+) -> None:
+    """Set the analyst review state of an assertion."""
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        repo = AssertionRepo(db)
+        asr = repo.get(assertion_id)
+        if asr is None:
+            fail(f"assertion not found: {assertion_id!r}", EXIT_NOT_FOUND)
+        try:
+            new_state = ReviewState(state)
+        except ValueError:
+            fail(f"invalid state {state!r}", EXIT_USAGE)
+        repo.set_review_state(assertion_id, new_state)
+        console.print(f"assertion {assertion_id} → {new_state.value}")
+    finally:
+        db.close()
+
+
+@assertion_app.command("list")
+def assertion_list(
+    case: str = typer.Option(..., "--case", help="Case ID or title."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """List assertions for a case."""
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        payload = [a.model_dump() for a in AssertionRepo(db).list_for_case(case_obj.id)]
+
+        def render(items: list[dict[str, Any]]) -> None:
+            if not items:
+                console.print("no assertions")
+                return
+            table = Table(title=f"assertions — {s(case_obj.title)}")
+            table.add_column("id")
+            table.add_column("claim")
+            table.add_column("statement")
+            table.add_column("review")
+            for a in items:
+                table.add_row(
+                    a["id"], a["claim_id"] or "—", s(a["statement"], 80), a["review_state"]
+                )
             console.print(table)
 
         emit(payload, as_json, render)

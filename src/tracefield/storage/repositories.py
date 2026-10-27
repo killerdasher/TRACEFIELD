@@ -424,6 +424,27 @@ class AssertionRepo:
             for r in rows
         ]
 
+    def get(self, asr_id: str) -> Assertion | None:
+        r = self.db.execute("SELECT * FROM assertions WHERE id=?", (asr_id,)).fetchone()
+        if r is None:
+            return None
+        return Assertion(
+            id=r["id"],
+            case_id=r["case_id"],
+            claim_id=r["claim_id"],
+            statement=r["statement"],
+            method=r["method"],
+            attribution=r["attribution"],
+            uncertainty=r["uncertainty"],
+            review_state=ReviewState(r["review_state"]),
+            evidence_ids=json.loads(r["evidence_ids"]),
+            created_at=r["created_at"],
+        )
+
+    def set_review_state(self, asr_id: str, state: ReviewState) -> None:
+        self.db.execute("UPDATE assertions SET review_state=? WHERE id=?", (state.value, asr_id))
+        self.db.commit()
+
 
 class ReportRepo:
     """Durable report identity, corrections, and shipment register (v2).
