@@ -418,15 +418,17 @@ class TestReportAndExport:
     def test_json_report_valid_and_versioned(self, settings, db, case_factory) -> None:
         case, _ = self._seed(settings, db, case_factory)
         payload = json.loads(build_report(settings, db, case, fmt="json"))
-        assert payload["report_schema_version"] == 2
+        assert payload["report_schema_version"] == 3
         assert payload["case"]["id"] == case.id
         assert payload["global_caveats"]
         # Dissemination block (OOVS-09): generated_at, tool, author/revision/
-        # corrections always present; an unset author is stated honestly.
+        # corrections always present; an unset author is stated honestly, and
+        # an unregistered payload says so instead of inventing an identity.
         assert payload["generated_at"].endswith("Z")  # tz-aware UTC
         assert payload["tool"]["name"] == "tracefield"
         assert payload["document"]["author"] == "author not set"
-        assert payload["document"]["revision"] == 1
+        assert payload["document"]["revision"] == "unregistered"
+        assert payload["document"]["report_id"] == ""
         assert payload["document"]["corrections"] == []
 
     def test_report_carries_configured_author(self, settings, db, case_factory) -> None:
@@ -513,6 +515,90 @@ class TestReportAndExport:
         export_case(settings, db, ws, case, out, redact=True)
         after = {e.id: e.sha256 for e in EvidenceRepo(db).list_for_case(case.id)}
         assert before == after
+
+    def test_register_chain(self, db, case_factory) -> None:
+        """Durable report identity chain (OOVS-09): revision N supersedes
+        N-1; the register names the replacement."""
+        from tracefield.storage.repositories import ReportRepo
+
+        case = case_factory("rep-chain")
+        repo = ReportRepo(db)
+        r1 = repo.register(case.id)
+        r2 = repo.register(case.id)
+        assert (r1.revision, r2.revision) == (1, 2)
+        assert r2.supersedes == r1.id
+        # r1 was returned before the supersession happened — re-read from
+        # storage for the post-linkage state.
+        assert repo.get(r1.id).superseded_by == r2.id
+        assert [r.id for r in repo.list_for_case(case.id)] == [r1.id, r2.id]
+        assert repo.get(r1.id) is not None
+
+    def test_registered_payload_carries_identity(self, settings, db, case_factory) -> None:
+        from tracefield.reporting.build import build_registered_report, build_report
+
+        case, _ = self._seed(settings, db, case_factory)
+        text1, r1 = build_registered_report(settings, db, case, fmt="json")
+        p1 = json.loads(text1)
+        assert p1["document"]["report_id"] == r1.id
+        assert p1["document"]["revision"] == 1
+        # The --no-register path stays identity-free and honest.
+        p0 = json.loads(build_report(settings, db, case, fmt="json", register=False))
+        assert p0["document"]["report_id"] == ""
+
+    def test_markdown_renders_identity_and_lineage(self, settings, db, case_factory) -> None:
+        from tracefield.reporting.build import build_registered_report
+
+        case, _ = self._seed(settings, db, case_factory)
+        _t1, r1 = build_registered_report(settings, db, case, fmt="json")
+        _t2, r2 = build_registered_report(settings, db, case, fmt="json")
+        _t3, r3 = build_registered_report(settings, db, case, fmt="markdown")
+        assert f"- **Report ID:** `{r3.id}`" in _t3
+        assert f"- **Supersedes:** `{r2.id}`" in _t3
+        assert "- **Superseded by:**" not in _t3  # r3 is current
+        # An earlier revision's marker is discoverable in the register
+        # (re-read from storage — the returned objects predate the links).
+        from tracefield.storage.repositories import ReportRepo
+
+        repo = ReportRepo(db)
+        assert repo.get(r1.id).superseded_by == r2.id
+        assert repo.get(r2.id).superseded_by == r3.id
+
+    def test_correction_travels_with_lineage(self, settings, db, case_factory) -> None:
+        from tracefield.reporting.build import build_case_payload, build_registered_report
+        from tracefield.storage.repositories import ReportRepo
+
+        case, _ = self._seed(settings, db, case_factory)
+        _t1, r1 = build_registered_report(settings, db, case, fmt="json")
+        correction = ReportRepo(db).add_correction(case.id, r1.id, "claim summary misquoted")
+        _t2, r2 = build_registered_report(settings, db, case, fmt="json")
+        payload2 = build_case_payload(settings, db, case)  # unregistered baseline
+        assert payload2["document"]["corrections"] == []
+        chain = ReportRepo(db).corrections_for_chain(r2.id)
+        assert [c.id for c in chain] == [correction.id]
+        assert chain[0].corrected_report_id == r1.id
+
+    def test_export_renders_one_identity_once(self, settings, db, case_factory) -> None:
+        """case-export: json + markdown are two renderings of ONE registered
+        identity (no double registration), and the README records it."""
+        from tracefield.storage.repositories import ReportRepo
+
+        case, ws = self._seed(settings, db, case_factory)
+        out = settings.data_root / "export-identity"
+        export_case(settings, db, ws, case, out, redact=True, recipient="field editor")
+        p = json.loads((out / "report.json").read_text(encoding="utf-8"))
+        rid = p["document"]["report_id"]
+        assert rid and p["document"]["revision"] == 1
+        md = (out / "report.md").read_text(encoding="utf-8")
+        assert f"`{rid}`" in md  # same identity in both renderings
+        readme = (out / "EXPORT_README.txt").read_text(encoding="utf-8")
+        assert f"report {rid} (revision 1" in readme
+        assert 'to recipient "field editor"' in readme
+        shipments = ReportRepo(db).shipments_for_case(case.id)
+        assert len(shipments) == 1 and shipments[0].report_id == rid
+        # Exactly one revision was minted for one export.
+        assert [r.revision for r in ReportRepo(db).list_for_case(case.id)] == [1]
+        ok, problems = verify_manifest(out)
+        assert ok, problems
 
 
 class TestCatalogue:

@@ -230,6 +230,42 @@ class AnalysisEvent(BaseModel):
     occurred_at: str = Field(default_factory=utcnow)
 
 
+class CaseReport(BaseModel):
+    """Durable report identity (OOVS-09): one row per materially rendered
+    report. Revision N supersedes revision N-1 — the recipient-facing answer
+    to "which exact document did you disseminate, and what replaced it?"."""
+
+    id: str = Field(default_factory=lambda: new_id("rep"))
+    case_id: str
+    revision: int = 1
+    supersedes: str = ""
+    superseded_by: str = ""
+    created_at: str = Field(default_factory=utcnow)
+
+
+class ReportCorrection(BaseModel):
+    """An analyst correction addressed at ONE specific registered report."""
+
+    id: str = Field(default_factory=lambda: new_id("cor"))
+    case_id: str
+    corrected_report_id: str
+    note: str
+    created_at: str = Field(default_factory=utcnow)
+
+
+class Dissemination(BaseModel):
+    """One recorded shipment: which recipient received which report, when.
+    Recipient follow-up is an operator action; this register makes it
+    traceable, it sends nothing."""
+
+    id: str = Field(default_factory=lambda: new_id("dsp"))
+    case_id: str
+    report_id: str
+    recipient: str
+    shipped_at: str = Field(default_factory=utcnow)
+    note: str = ""
+
+
 class AssessmentVector(BaseModel):
     """Explainable multi-dimensional assessment — never a single 'truth score'."""
 

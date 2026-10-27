@@ -9,7 +9,10 @@ Correct order of operations (regression-tested):
    when redaction is on). Binary originals are never silently rewritten:
    rewriting would invalidate the very digests the manifest asserts.
 4. Build the manifest over the FINAL exported bytes.
-5. Write reports (also redacted) and the export README.
+5. Write reports (also redacted) and the export README. The two report
+   renderings come from ONE registered payload — a single durable report
+   identity (schema v2), with the shipment recorded when ``recipient`` is
+   given.
 """
 
 from __future__ import annotations
@@ -22,7 +25,11 @@ from pathlib import Path
 from tracefield.config import Settings
 from tracefield.core.domain import Case
 from tracefield.core.provenance import IntegrityManifest
-from tracefield.reporting.build import build_report
+from tracefield.reporting.build import (
+    apply_report_identity,
+    build_case_payload,
+    render_markdown,
+)
 from tracefield.security import redact_secrets
 from tracefield.storage.database import Database
 from tracefield.storage.workspace import CaseWorkspace
@@ -88,6 +95,7 @@ def export_case(
     output: Path,
     *,
     redact: bool = True,
+    recipient: str = "",
 ) -> None:
     output.mkdir(parents=True, exist_ok=True)
     case_dir = ws.case_dir(case.id)
@@ -150,27 +158,51 @@ def export_case(
     manifest = IntegrityManifest.build_from_dir(case.id, output, redaction_applied=redact)
     (output / "manifest.json").write_text(manifest.to_json(), encoding="utf-8")
 
-    report_json = build_report(settings, db, case, fmt="json")
-    report_md = build_report(settings, db, case, fmt="markdown")
+    # ONE payload, registered ONCE: report.json and report.md are two
+    # renderings of the same durable identity. Registering per format would
+    # mint two revisions for one shipped document — a false correction trail.
+    payload = build_case_payload(settings, db, case)
+    identity = apply_report_identity(db, payload, case.id)
+    report_json = json.dumps(payload, indent=2, sort_keys=True)
+    report_md = render_markdown(payload)
     if redact:
         report_json = redact_secrets(report_json)
         report_md = redact_secrets(report_md)
     (output / "report.json").write_text(report_json + "\n", encoding="utf-8")
     (output / "report.md").write_text(report_md, encoding="utf-8")
-    (output / "EXPORT_README.txt").write_text(
+
+    supersedes_clause = (
+        f", supersedes {identity.supersedes}" if identity.supersedes else ", first revision"
+    )
+    readme = (
         "TRACEFIELD case export\n"
         "=====================\n"
         "manifest.json           — integrity manifest (SHA-256 per evidence "
         "file, built after redaction)\n"
-        "report.md / report.json — case report with caveats\n"
+        "report.md / report.json — case report "
+        f"{identity.id} (revision {identity.revision}{supersedes_clause}) — two "
+        "renderings of one registered document; corrections recorded against "
+        "its lineage appear in the report's Corrections section\n"
         "SENSITIVE_METADATA.txt  — GPS/location metadata advisory\n"
         "evidence/               — evidence copies (content-addressed)\n\n"
         "Digests prove byte integrity of files in THIS export at generation\n"
         "time only. Deleting the active TRACEFIELD database does NOT erase\n"
         "this export or any other copies you have made.\n"
-        "Secret redaction was " + ("ENABLED" if redact else "DISABLED") + ".\n",
-        encoding="utf-8",
+        "Secret redaction was " + ("ENABLED" if redact else "DISABLED") + ".\n"
     )
+    if recipient:
+        from tracefield.storage.repositories import ReportRepo
+
+        shipment = ReportRepo(db).add_shipment(case.id, identity.id, recipient)
+        readme += (
+            f"\nRecorded shipment: report {identity.id} (revision "
+            f'{identity.revision}) to recipient "{recipient}" at '
+            f"{shipment.shipped_at} (dissemination entry {shipment.id}).\n"
+            "Replaced or corrected this report later? Recipients on record —\n"
+            "see `tracefield report-history` — must be told which revision is\n"
+            "current; this register exists to make that notification possible.\n"
+        )
+    (output / "EXPORT_README.txt").write_text(readme, encoding="utf-8")
 
 
 def verify_manifest(export_dir: Path) -> tuple[bool, list[str]]:

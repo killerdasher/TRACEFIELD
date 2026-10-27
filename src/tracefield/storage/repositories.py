@@ -14,14 +14,17 @@ from tracefield.core.domain import (
     AnalysisEvent,
     Assertion,
     Case,
+    CaseReport,
     CaseStatus,
     Claim,
     ClaimStatus,
+    Dissemination,
     EvidenceItem,
     Observation,
     OriginCluster,
     Relation,
     RelationType,
+    ReportCorrection,
     ReviewState,
     Source,
     SourceType,
@@ -417,6 +420,184 @@ class AssertionRepo:
                 review_state=ReviewState(r["review_state"]),
                 evidence_ids=json.loads(r["evidence_ids"]),
                 created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+
+class ReportRepo:
+    """Durable report identity, corrections, and shipment register (v2).
+
+    All register writes are small and transactional; chain maintenance
+    (supersedes/superseded_by) happens inside ``register`` so a report
+    identity is never left partially linked."""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def register(self, case_id: str) -> CaseReport:
+        """Mint the next revision for ``case_id`` and link the chain."""
+        prev_row = self.db.execute(
+            "SELECT id, revision FROM case_reports WHERE case_id=? ORDER BY revision DESC LIMIT 1",
+            (case_id,),
+        ).fetchone()
+        identity = CaseReport(
+            case_id=case_id,
+            revision=(prev_row["revision"] + 1) if prev_row else 1,
+            supersedes=prev_row["id"] if prev_row else "",
+        )
+        self.db.execute(
+            "INSERT INTO case_reports(id,case_id,revision,supersedes,superseded_by,"
+            "created_at) VALUES(?,?,?,?,?,?)",
+            (
+                identity.id,
+                identity.case_id,
+                identity.revision,
+                identity.supersedes,
+                "",
+                identity.created_at,
+            ),
+        )
+        if prev_row is not None:
+            self.db.execute(
+                "UPDATE case_reports SET superseded_by=? WHERE id=?",
+                (identity.id, prev_row["id"]),
+            )
+        self.db.commit()
+        return identity
+
+    def get(self, report_id: str) -> CaseReport | None:
+        r = self.db.execute("SELECT * FROM case_reports WHERE id=?", (report_id,)).fetchone()
+        if r is None:
+            return None
+        return CaseReport(
+            id=r["id"],
+            case_id=r["case_id"],
+            revision=r["revision"],
+            supersedes=r["supersedes"],
+            superseded_by=r["superseded_by"],
+            created_at=r["created_at"],
+        )
+
+    def list_for_case(self, case_id: str) -> list[CaseReport]:
+        rows = self.db.execute(
+            "SELECT * FROM case_reports WHERE case_id=? ORDER BY revision", (case_id,)
+        ).fetchall()
+        return [
+            CaseReport(
+                id=r["id"],
+                case_id=r["case_id"],
+                revision=r["revision"],
+                supersedes=r["supersedes"],
+                superseded_by=r["superseded_by"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def lineage(self, report_id: str) -> list[CaseReport]:
+        """The report and every ancestor it supersedes, newest first."""
+        chain: list[CaseReport] = []
+        seen: set[str] = set()
+        cur = self.get(report_id)
+        while cur is not None and cur.id not in seen:
+            chain.append(cur)
+            seen.add(cur.id)
+            cur = self.get(cur.supersedes) if cur.supersedes else None
+        return chain
+
+    def add_correction(self, case_id: str, report_id: str, note: str) -> ReportCorrection:
+        correction = ReportCorrection(case_id=case_id, corrected_report_id=report_id, note=note)
+        self.db.execute(
+            "INSERT INTO report_corrections(id,case_id,corrected_report_id,note,"
+            "created_at) VALUES(?,?,?,?,?)",
+            (
+                correction.id,
+                correction.case_id,
+                correction.corrected_report_id,
+                correction.note,
+                correction.created_at,
+            ),
+        )
+        self.db.commit()
+        return correction
+
+    def corrections_for_chain(self, report_id: str) -> list[ReportCorrection]:
+        """Corrections addressed at ``report_id`` or any ancestor it
+        supersedes — a superseded report's corrections travel with the
+        lineage, so a re-render never silently drops a known error."""
+        chain_ids = [rep.id for rep in self.lineage(report_id)]
+        if not chain_ids:
+            return []
+        placeholders = ",".join("?" for _ in chain_ids)
+        rows = self.db.execute(
+            "SELECT * FROM report_corrections WHERE corrected_report_id IN "
+            f"({placeholders}) ORDER BY created_at, rowid",
+            tuple(chain_ids),
+        ).fetchall()
+        return [
+            ReportCorrection(
+                id=r["id"],
+                case_id=r["case_id"],
+                corrected_report_id=r["corrected_report_id"],
+                note=r["note"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def corrections_for_case(self, case_id: str) -> list[ReportCorrection]:
+        rows = self.db.execute(
+            "SELECT * FROM report_corrections WHERE case_id=? ORDER BY created_at, rowid",
+            (case_id,),
+        ).fetchall()
+        return [
+            ReportCorrection(
+                id=r["id"],
+                case_id=r["case_id"],
+                corrected_report_id=r["corrected_report_id"],
+                note=r["note"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def add_shipment(
+        self, case_id: str, report_id: str, recipient: str, note: str = ""
+    ) -> Dissemination:
+        shipment = Dissemination(
+            case_id=case_id,
+            report_id=report_id,
+            recipient=recipient,
+            note=note,
+        )
+        self.db.execute(
+            "INSERT INTO dissemination(id,case_id,report_id,recipient,shipped_at,"
+            "note) VALUES(?,?,?,?,?,?)",
+            (
+                shipment.id,
+                shipment.case_id,
+                shipment.report_id,
+                shipment.recipient,
+                shipment.shipped_at,
+                shipment.note,
+            ),
+        )
+        self.db.commit()
+        return shipment
+
+    def shipments_for_case(self, case_id: str) -> list[Dissemination]:
+        rows = self.db.execute(
+            "SELECT * FROM dissemination WHERE case_id=? ORDER BY rowid", (case_id,)
+        ).fetchall()
+        return [
+            Dissemination(
+                id=r["id"],
+                case_id=r["case_id"],
+                report_id=r["report_id"],
+                recipient=r["recipient"],
+                shipped_at=r["shipped_at"],
+                note=r["note"],
             )
             for r in rows
         ]

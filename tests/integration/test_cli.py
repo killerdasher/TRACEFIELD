@@ -349,3 +349,108 @@ class TestStructuredLogging:
         assert "boom" in unhandled[-1]["exc"]
         # and the process did not blow up with a raw traceback on stdout
         assert "Traceback (most recent call last)" not in out
+
+
+class TestReportRegister:
+    """Durable report identity through the real CLI (schema v2, OOVS-09)."""
+
+    def test_report_registers_and_history_lists(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "rep-reg", "--json"])
+        out_path = tmp_path / "r1.json"
+        code, _, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["report", "rep-reg", "--format", "json", "--output", str(out_path)],
+        )
+        assert code == EXIT_OK
+        p1 = json.loads(out_path.read_text(encoding="utf-8"))
+        assert p1["document"]["report_id"]
+        assert p1["document"]["revision"] == 1
+
+        # Second render = revision 2 superseding 1.
+        out2 = tmp_path / "r2.json"
+        run_cli_out(
+            monkeypatch, capsys, ["report", "rep-reg", "--format", "json", "--output", str(out2)]
+        )
+        p2 = json.loads(out2.read_text(encoding="utf-8"))
+        assert p2["document"]["revision"] == 2
+        assert p2["document"]["supersedes"] == p1["document"]["report_id"]
+
+        code, out, _ = run_cli_out(monkeypatch, capsys, ["report-history", "rep-reg", "--json"])
+        assert code == EXIT_OK
+        hist = json.loads(out)
+        assert [r["revision"] for r in hist["reports"]] == [1, 2]
+        assert hist["corrections"] == [] and hist["shipments"] == []
+
+    def test_report_correct_end_to_end(self, tf_home, monkeypatch, capsys, tmp_path) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "rep-corr", "--json"])
+        out_path = tmp_path / "r.json"
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            ["report", "rep-corr", "--format", "json", "--output", str(out_path)],
+        )
+        rid = json.loads(out_path.read_text(encoding="utf-8"))["document"]["report_id"]
+
+        # Unknown report id → not found (2).
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["report-correct", "rep-corr", "--report", "rep_nope", "--note", "x"],
+        )
+        assert code == EXIT_NOT_FOUND and "not found" in err
+
+        code, out, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["report-correct", "rep-corr", "--report", rid, "--note", "figure misread", "--json"],
+        )
+        assert code == EXIT_OK
+        corr = json.loads(out)
+        assert corr["corrected_report_id"] == rid and corr["note"] == "figure misread"
+
+        # The correction appears in the history register and in the next
+        # registered render of the lineage.
+        _, out, _ = run_cli_out(monkeypatch, capsys, ["report-history", "rep-corr", "--json"])
+        hist = json.loads(out)
+        assert [c["note"] for c in hist["corrections"]] == ["figure misread"]
+        out2 = tmp_path / "r2.json"
+        run_cli_out(
+            monkeypatch, capsys, ["report", "rep-corr", "--format", "json", "--output", str(out2)]
+        )
+        p2 = json.loads(out2.read_text(encoding="utf-8"))
+        assert [c["corrected_report_id"] for c in p2["document"]["corrections"]] == [rid]
+
+    def test_case_export_records_shipment(self, tf_home, monkeypatch, capsys, tmp_path) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "rep-ship", "--json"])
+        exp = tmp_path / "bundle"
+        code, _, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["case-export", "rep-ship", "--output", str(exp), "--recipient", "legal team"],
+        )
+        assert code == EXIT_OK
+        readme = (exp / "EXPORT_README.txt").read_text(encoding="utf-8")
+        assert 'to recipient "legal team"' in readme
+        _, out, _ = run_cli_out(monkeypatch, capsys, ["report-history", "rep-ship", "--json"])
+        hist = json.loads(out)
+        assert len(hist["shipments"]) == 1
+        assert hist["shipments"][0]["recipient"] == "legal team"
+        assert hist["shipments"][0]["report_id"] == hist["reports"][0]["id"]
+
+    def test_report_correct_across_cases_is_not_found(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        run_cli_out(monkeypatch, capsys, ["case", "create", "rc-a", "--json"])
+        run_cli_out(monkeypatch, capsys, ["case", "create", "rc-b", "--json"])
+        out_path = tmp_path / "ra.json"
+        run_cli_out(
+            monkeypatch, capsys, ["report", "rc-a", "--format", "json", "--output", str(out_path)]
+        )
+        rid = json.loads(out_path.read_text(encoding="utf-8"))["document"]["report_id"]
+        code, _, err = run_cli_out(
+            monkeypatch, capsys, ["report-correct", "rc-b", "--report", rid, "--note", "x"]
+        )
+        assert code == EXIT_NOT_FOUND and "not found in this case" in err

@@ -1577,9 +1577,15 @@ def report(
     case: str = typer.Argument(..., help="Case ID or title."),
     fmt: str = typer.Option("markdown", "--format", "-f", help="markdown|json|html"),
     output: Path = typer.Option(None, "--output", "-o", help="Write to file."),
+    register: bool = typer.Option(
+        True,
+        "--register/--no-register",
+        help="Give this rendered report a durable identity revision (OOVS-09).",
+    ),
 ) -> None:
     """Build a human-reviewable report with caveats and provenance."""
-    from tracefield.reporting.build import build_report
+    from tracefield.reporting.build import build_registered_report, build_report
+    from tracefield.storage.repositories import ReportRepo
 
     settings = load_settings()
     db = open_db(settings)
@@ -1587,7 +1593,10 @@ def report(
         case_obj = resolve_case(CaseRepo(db), case)
         if fmt not in ("markdown", "json", "html"):
             fail(f"unsupported format {fmt!r} (use markdown, json, or html)", EXIT_USAGE)
-        text = build_report(settings, db, case_obj, fmt=fmt)
+        text = build_report(settings, db, case_obj, fmt=fmt, register=False)
+        identity = None
+        if register:
+            text, identity = build_registered_report(settings, db, case_obj, fmt=fmt)
         if output:
             output.write_text(text, encoding="utf-8")
             console.print(f"wrote {s(str(output), 400)}")
@@ -1595,6 +1604,121 @@ def report(
             # Report content embeds source-derived text: render literally and
             # never word-wrap (wrapping would corrupt piped markdown).
             console.print(text, markup=False, highlight=False, soft_wrap=True)
+        if identity is not None:
+            corrections = ReportRepo(db).corrections_for_chain(identity.id)
+            chain = (
+                f" supersedes {identity.supersedes}" if identity.supersedes else " (first revision)"
+            )
+            # stderr: stdout carries the (possibly parsed) report document.
+            err_console.print(
+                f"[dim]report identity: {identity.id} — revision {identity.revision}"
+                f"{chain}; {len(corrections)} correction(s) in lineage "
+                "(report-history shows the full register)[/dim]"
+            )
+    finally:
+        db.close()
+
+
+@app.command("report-correct")
+def report_correct(
+    case: str = typer.Argument(..., help="Case ID or title."),
+    report_id: str = typer.Option(..., "--report", help="Report ID to correct."),
+    note: str = typer.Option(..., "--note", help="What is wrong in that report."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Record a correction addressed at one registered report.
+
+    Corrections are appended, never silently rewritten: a disseminated
+    report stays identifiable and its error stays documented (OOVS-09).
+    """
+    from tracefield.storage.repositories import ReportRepo
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        repo = ReportRepo(db)
+        target = repo.get(report_id)
+        if target is None or target.case_id != case_obj.id:
+            fail(f"report not found in this case: {report_id!r}", EXIT_NOT_FOUND)
+        correction = repo.add_correction(case_obj.id, report_id, note)
+        ws = CaseWorkspace(settings.cases_root, db)
+        _append_event(ws, case_obj.id, "report.correction", [report_id], [correction.id])
+
+        def render(c: dict[str, Any]) -> None:
+            console.print(f"[green]recorded[/green] correction [bold]{c['id']}[/bold]")
+            console.print(f"  report:  {c['corrected_report_id']}")
+            console.print(f"  note:    {s(c['note'], 200)}")
+            console.print(
+                "[dim]the correction appears in the next registered render of "
+                "this report lineage — recipients of prior revisions must be "
+                "notified (report-history lists recorded recipients)[/dim]"
+            )
+
+        emit(correction.model_dump(), as_json, render)
+    finally:
+        db.close()
+
+
+@app.command("report-history")
+def report_history(
+    case: str = typer.Argument(..., help="Case ID or title."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Show the registered report chain: revisions, corrections, shipments."""
+    from tracefield.storage.repositories import ReportRepo
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        repo = ReportRepo(db)
+        payload = {
+            "reports": [r.model_dump() for r in repo.list_for_case(case_obj.id)],
+            "corrections": [c.model_dump() for c in repo.corrections_for_case(case_obj.id)],
+            "shipments": [d.model_dump() for d in repo.shipments_for_case(case_obj.id)],
+        }
+
+        def render(p: dict[str, Any]) -> None:
+            if not p["reports"]:
+                console.print(
+                    "no registered reports — build one with: "
+                    f"tracefield report {s(case_obj.title)} --register"
+                )
+                return
+            table = Table(title=f"report revisions — {s(case_obj.title)}")
+            table.add_column("id")
+            table.add_column("rev")
+            table.add_column("supersedes")
+            table.add_column("superseded_by")
+            table.add_column("created")
+            for r in p["reports"]:
+                table.add_row(
+                    r["id"],
+                    str(r["revision"]),
+                    r["supersedes"] or "—",
+                    r["superseded_by"] or "—",
+                    r["created_at"],
+                )
+            console.print(table)
+            if p["corrections"]:
+                console.print("[bold]corrections[/bold]")
+                for c in p["corrections"]:
+                    console.print(
+                        f"  {c['created_at']} — {c['corrected_report_id']}: {s(c['note'], 160)}"
+                    )
+            if p["shipments"]:
+                console.print("[bold]shipments (dissemination register)[/bold]")
+                for d in p["shipments"]:
+                    console.print(
+                        f"  {d['shipped_at']} — {d['report_id']} → {s(d['recipient'], 120)}"
+                    )
+                console.print(
+                    "[dim]corrections reaching prior recipients is an "
+                    "operator action; this register makes it traceable[/dim]"
+                )
+
+        emit(payload, as_json, render)
     finally:
         db.close()
 
@@ -1608,6 +1732,12 @@ def case_export(
         "--redact/--no-redact",
         help="Redact secrets from text artifacts; emit GPS advisory.",
     ),
+    recipient: str = typer.Option(
+        "",
+        "--recipient",
+        help="Record that this bundle was shipped to a named recipient "
+        "(dissemination register, OOVS-09).",
+    ),
 ) -> None:
     """Export a case bundle with an integrity manifest (built after redaction)."""
     settings = load_settings()
@@ -1617,7 +1747,7 @@ def case_export(
         ws = CaseWorkspace(settings.cases_root, db)
         from tracefield.reporting.export import export_case
 
-        export_case(settings, db, ws, case_obj, output, redact=redact)
+        export_case(settings, db, ws, case_obj, output, redact=redact, recipient=recipient)
         console.print(f"[green]exported[/green] case {case_obj.id} → {s(str(output), 400)}")
         console.print(
             "[dim]note: deleting the active database does not erase this export "

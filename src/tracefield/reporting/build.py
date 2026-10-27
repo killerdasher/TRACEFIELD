@@ -13,7 +13,7 @@ from typing import Any
 from tracefield import __version__
 from tracefield.config import Settings
 from tracefield.core.analysis import assess_claim
-from tracefield.core.domain import Case, utcnow
+from tracefield.core.domain import Case, CaseReport, utcnow
 from tracefield.storage.database import Database
 from tracefield.storage.repositories import (
     AssertionRepo,
@@ -27,7 +27,9 @@ from tracefield.storage.repositories import (
 )
 
 REPORT_SCHEMA_VERSION = (
-    2  # v2 adds the dissemination block (generated_at, tool, document); additive to v1
+    3  # v3: the document block gains durable report identity (report_id,
+    # supersedes, superseded_by) plus correction records; additive to
+    # v2 (dissemination block) and v1
 )
 
 
@@ -56,9 +58,14 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
             # Dissemination controls (OOVS-09): who authored this report,
             # which revision it is, and any recorded corrections. When no
             # author identity is configured the report says so honestly
-            # rather than inventing one.
+            # rather than inventing one. A payload built without a register
+            # step reports that plainly: revision reads "unregistered" and
+            # carries no report id — reporting the state, not faking one.
             "author": settings.report_author or "author not set",
-            "revision": 1,
+            "revision": "unregistered",
+            "report_id": "",
+            "supersedes": "",
+            "superseded_by": "",
             "corrections": [],
         },
         "case": case.model_dump(),
@@ -114,6 +121,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
     doc = payload["document"]
     lines.append(f"- **Author:** {doc['author']}")
     lines.append(f"- **Revision:** {doc['revision']}")
+    if doc.get("report_id"):
+        lines.append(f"- **Report ID:** `{doc['report_id']}`")
+        if doc.get("supersedes"):
+            lines.append(f"- **Supersedes:** `{doc['supersedes']}`")
+        if doc.get("superseded_by"):
+            lines.append(f"- **Superseded by:** `{doc['superseded_by']}`")
     corrections = doc["corrections"]
     if corrections:
         lines.append(f"- **Corrections:** {len(corrections)} recorded (see below)")
@@ -131,7 +144,9 @@ def render_markdown(payload: dict[str, Any]) -> str:
         lines.append("## Corrections")
         lines.append("")
         for corr in corrections:
-            lines.append(f"- {corr.get('at', '')} — {corr.get('note', '')}")
+            when = corr.get("created_at", corr.get("at", ""))
+            corrected = corr.get("corrected_report_id", "this report")
+            lines.append(f"- {when} — report `{corrected}`: {corr.get('note', '')}")
         lines.append("")
 
     lines.append("## Sources")
@@ -269,6 +284,12 @@ def render_html(payload: dict[str, Any]) -> str:
     _doc = payload["document"]
     out.append(f"<li><b>Author:</b> {_h(_doc['author'])}</li>")
     out.append(f"<li><b>Revision:</b> {_h(_doc['revision'])}</li>")
+    if _doc.get("report_id"):
+        out.append(f"<li><b>Report ID:</b> <code>{_h(_doc['report_id'])}</code></li>")
+        if _doc.get("supersedes"):
+            out.append(f"<li><b>Supersedes:</b> <code>{_h(_doc['supersedes'])}</code></li>")
+        if _doc.get("superseded_by"):
+            out.append(f"<li><b>Superseded by:</b> <code>{_h(_doc['superseded_by'])}</code></li>")
     out.append(f"<li><b>Corrections:</b> {_h(len(_doc['corrections']))} recorded</li>")
     out.append(f"<li><b>Report schema:</b> v{_h(payload['report_schema_version'])}</li>")
     out.append("</ul>")
@@ -280,7 +301,11 @@ def render_html(payload: dict[str, Any]) -> str:
     if _corr:
         out.append("<h2>Corrections</h2><ul>")
         for corr in _corr:
-            out.append(f"<li>{_h(corr.get('at', ''))} — {_h(corr.get('note', ''))}</li>")
+            when = corr.get("created_at", corr.get("at", ""))
+            corrected = corr.get("corrected_report_id", "this report")
+            out.append(
+                f"<li>{_h(when)} — report <code>{_h(corrected)}</code>: {_h(corr.get('note', ''))}</li>"
+            )
         out.append("</ul>")
 
     out.append("<h2>Sources</h2>")
@@ -362,8 +387,65 @@ def render_html(payload: dict[str, Any]) -> str:
     return "\n".join(out) + "\n"
 
 
-def build_report(settings: Settings, db: Database, case: Case, *, fmt: str) -> str:
+def apply_report_identity(db: Database, payload: dict[str, Any], case_id: str) -> CaseReport:
+    """Give a report payload its durable identity: register a new revision,
+    then stamp the document block and attach the correction lineage.
+
+    ONE call = ONE registered revision. Callers that render several formats
+    from one document (case export) must build the payload once and render
+    the shared payload, never call this twice.
+    """
+    from tracefield.storage.repositories import ReportRepo
+
+    repo = ReportRepo(db)
+    identity = repo.register(case_id)
+    doc = payload["document"]
+    doc["report_id"] = identity.id
+    doc["revision"] = identity.revision
+    doc["supersedes"] = identity.supersedes
+    doc["superseded_by"] = identity.superseded_by
+    doc["corrections"] = [c.model_dump() for c in repo.corrections_for_chain(identity.id)]
+    return identity
+
+
+def build_registered_report(
+    settings: Settings,
+    db: Database,
+    case: Case,
+    *,
+    fmt: str,
+) -> tuple[str, CaseReport]:
+    """Rendered report text plus its freshly minted durable identity.
+
+    Exactly ONE revision is registered per call, so multi-format exporters
+    must take both renderings from the returned payload's identity — never
+    call this twice for one document."""
     payload = build_case_payload(settings, db, case)
+    identity = apply_report_identity(db, payload, case.id)
+    if fmt == "json":
+        text = json.dumps(payload, indent=2, sort_keys=True)
+    elif fmt == "markdown":
+        text = render_markdown(payload)
+    elif fmt == "html":
+        text = render_html(payload)
+    else:
+        raise ValueError(f"unsupported report format: {fmt} (use markdown, json, or html)")
+    return text, identity
+
+
+def build_report(
+    settings: Settings,
+    db: Database,
+    case: Case,
+    *,
+    fmt: str,
+    register: bool = False,
+) -> str:
+    """Render a report; with ``register=True`` the rendered document is also
+    given a durable subject revision (OOVS-09 dissemination controls)."""
+    payload = build_case_payload(settings, db, case)
+    if register:
+        apply_report_identity(db, payload, case.id)
     if fmt == "json":
         return json.dumps(payload, indent=2, sort_keys=True)
     if fmt == "markdown":
