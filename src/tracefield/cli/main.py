@@ -1620,6 +1620,68 @@ def tools_status(
     emit(counts, as_json, render)
 
 
+@catalog_app.command("stale")
+def catalog_stale(
+    max_age_days: int = typer.Option(
+        180,
+        "--max-age-days",
+        min=1,
+        help="Flag entries whose last_checked predates today minus this many days.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """List catalogue entries with overdue last_checked dates.
+
+    Read-only inventory of record freshness — NOT a health verdict and NOT
+    an automated re-verification. The shipped catalogue is inert data
+    (decision D7/D22): checking a tool upstream is an operator action this
+    command deliberately never performs (no network, no writes).
+    """
+    from tracefield.registry import Catalog
+
+    path = _default_catalog_path()
+    if not path.exists():
+        fail(f"catalogue data not found at {path}", EXIT_NOT_FOUND)
+    cat = Catalog(path)
+    rows, unknown = cat.stale_entries(max_age_days=max_age_days)
+    payload = {
+        "total": len(cat.entries),
+        "stale_count": len(rows),
+        "unknown_count": unknown,
+        "max_age_days": max_age_days,
+        "entries": rows,
+    }
+
+    def render(p: dict[str, Any]) -> None:
+        console.print(
+            f"catalogue: {p['total']} records — {p['stale_count']} last checked more than "
+            f"{p['max_age_days']} day(s) ago, {p['unknown_count']} without a parseable check date"
+        )
+        console.print(
+            "[dim]stale listing is not a health verdict; verification is operator-manual "
+            "(this command never contacts upstream)[/dim]"
+        )
+        if not rows:
+            return
+        table = Table(title=f"overdue for re-verification (> {p['max_age_days']} days)")
+        table.add_column("id")
+        table.add_column("name")
+        table.add_column("last_checked")
+        table.add_column("age (days)")
+        for e in rows[:200]:
+            table.add_row(
+                e["id"],
+                s(e["canonical_name"], 60),
+                e["last_checked"] or "—",
+                str(e["age_days"]) if e["age_days"] is not None else "unknown",
+            )
+        console.print(table)
+        if len(rows) > 200:
+            console.print(f"[dim]… {len(rows) - 200} more (use --json for the full list)[/dim]")
+
+    emit(payload, as_json, render)
+
+
 @catalog_app.command("validate")
 def catalog_validate(
     as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),

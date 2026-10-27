@@ -110,6 +110,20 @@ def utc_today() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def checked_age_days(last_checked: str, now: datetime) -> int | None:
+    """Age of a ``last_checked`` timestamp in whole days, or None when it
+    is empty/unparseable (unknown freshness is reported, never guessed)."""
+    if not last_checked:
+        return None
+    try:
+        ts = datetime.fromisoformat(last_checked.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return max(0, (now - ts).days)
+
+
 class Catalog:
     """In-memory catalogue with JSONL persistence. Loaders treat file
     content as untrusted data — validated by pydantic, never executed."""
@@ -138,6 +152,32 @@ class Catalog:
                 count += 1
         self.path = path
         return count
+
+    def stale_entries(self, *, max_age_days: int) -> tuple[list[dict[str, Any]], int]:
+        """Rows whose ``last_checked`` is older than ``max_age_days`` (plus
+        unparseable/empty dates), as (rows, unknown_dates) dicts.
+
+        Record FRESHNESS only — an out-of-date catalogue row is not a health
+        verdict, and this check never contacts upstream. The shipped
+        catalogue is inert data; re-verification is operator-manual.
+        """
+        now = datetime.now(UTC)
+        rows: list[dict[str, Any]] = []
+        unknown = 0
+        for e in sorted(self.entries.values(), key=lambda x: (x.canonical_name.lower(), x.id)):
+            age = checked_age_days(e.last_checked, now)
+            if age is None:
+                unknown += 1
+            if age is None or age > max_age_days:
+                rows.append(
+                    {
+                        "id": e.id,
+                        "canonical_name": e.canonical_name,
+                        "last_checked": e.last_checked,
+                        "age_days": age,
+                    }
+                )
+        return rows, unknown
 
     def save(self, path: Path | None = None) -> None:
         target = path or self.path

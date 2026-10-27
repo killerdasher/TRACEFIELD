@@ -642,3 +642,37 @@ class TestCatalogue:
         assert e.description.startswith("__import__")
         dumped = json.loads(e.model_dump_json())
         assert dumped["description"] == e.description
+
+    def test_stale_entries_flag_old_and_unknown_dates(self) -> None:
+        """FS-20/D7 decision: freshness listing, never a health verdict."""
+        from datetime import UTC, datetime, timedelta
+
+        from tracefield.registry import Catalog, CatalogEntry, EntryType, checked_age_days
+
+        stale_date = (datetime.now(UTC) - timedelta(days=200)).isoformat(timespec="seconds")
+        fresh_date = (datetime.now(UTC) - timedelta(days=3)).isoformat(timespec="seconds")
+        cat = Catalog()  # constructed entries only, no file
+        for entry_id, last_checked in (
+            ("old-tool", stale_date),
+            ("fresh-tool", fresh_date),
+            ("no-date", ""),
+            ("bad-date", "not-a-date"),
+        ):
+            cat.add(
+                CatalogEntry(
+                    id=entry_id,
+                    canonical_name=entry_id.upper(),
+                    entry_type=EntryType.CLI_TOOL,
+                    first_seen="2026-01-01T00:00:00Z",
+                    last_checked=last_checked,
+                )
+            )
+        rows, unknown = cat.stale_entries(max_age_days=180)
+        ids = {r["id"] for r in rows}
+        assert ids == {"old-tool", "no-date", "bad-date"}
+        assert unknown == 2  # unknown freshness is REPORTED, not guessed
+        ages = {r["id"]: r["age_days"] for r in rows}
+        assert ages["no-date"] is None
+        assert ages["bad-date"] is None
+        assert ages["old-tool"] >= 200
+        assert checked_age_days(fresh_date, datetime.now(UTC)) == 3

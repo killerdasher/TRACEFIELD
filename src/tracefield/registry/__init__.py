@@ -7,6 +7,7 @@ from tracefield.registry.catalog import (
     IntegrationState,
     MaintenanceStatus,
     PricingClass,
+    checked_age_days,
     default_catalog_path,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "IntegrationState",
     "MaintenanceStatus",
     "PricingClass",
+    "checked_age_days",
     "default_catalog_path",
 ]

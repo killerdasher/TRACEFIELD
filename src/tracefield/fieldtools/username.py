@@ -21,7 +21,7 @@ from tracefield.core.domain import UsernameResultState
 
 REQUEST_TIMEOUT_S = 10.0
 MIN_INTERVAL_S = 1.0  # polite rate limit between requests
-USER_AGENT = "tracefield/0.1 (public-profile existence check; contact: local)"
+USER_AGENT = "tracefield/0.1 (+https://github.com/killerdasher/TRACEFIELD)"
 
 
 @dataclass(frozen=True)

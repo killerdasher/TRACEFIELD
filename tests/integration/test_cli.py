@@ -702,3 +702,24 @@ class TestAssertions:
             ],
         )
         assert code == EXIT_USAGE and "--statement" in err
+
+
+class TestCatalogStale:
+    """Read-only freshness inventory (FS-20): informational, never a gate."""
+
+    def test_catalog_stale_json_is_read_only_inventory(self, tf_home, monkeypatch, capsys) -> None:
+        code, out, _ = run_cli_out(monkeypatch, capsys, ["catalog", "stale", "--json"])
+        assert code == EXIT_OK
+        p = json.loads(out)
+        assert p["total"] > 0
+        for key in ("stale_count", "unknown_count", "max_age_days", "entries"):
+            assert key in p
+        # no health semantics anywhere in the response
+        assert "health_result" not in p
+
+    def test_catalog_stale_human_mode_mentions_verdict_caveat(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        code, out, _ = run_cli_out(monkeypatch, capsys, ["catalog", "stale"])
+        assert code == EXIT_OK
+        assert "not a health verdict" in " ".join(out.split())
