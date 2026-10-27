@@ -4,13 +4,16 @@ provenance chain, reports, export, catalogue."""
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from tracefield.core.domain import (
     Case,
     Claim,
+    EvidenceItem,
     Relation,
     RelationType,
     Source,
@@ -21,6 +24,7 @@ from tracefield.reporting.build import build_report
 from tracefield.reporting.export import export_case, verify_manifest
 from tracefield.storage import CaseWorkspace, Database
 from tracefield.storage.repositories import (
+    AssertionRepo,
     CaseRepo,
     ClaimRepo,
     EventRepo,
@@ -34,16 +38,53 @@ pytestmark = pytest.mark.integration
 
 
 class TestMigrations:
-    def test_fresh_db_is_v1(self, settings) -> None:
+    def test_fresh_db_is_current(self, settings) -> None:
+        from tracefield import SCHEMA_VERSION
+
         db = Database(settings.db_path)
-        assert db.schema_version == 1
+        assert db.schema_version == SCHEMA_VERSION == 2
         db.close()
 
     def test_migrate_is_idempotent(self, settings) -> None:
         db = Database(settings.db_path)
         db.migrate()
         db.migrate()
-        assert db.schema_version == 1
+        assert db.schema_version == 2
+        db.close()
+
+    def test_migration_from_v1_database(self, settings) -> None:
+        """A database created with only migration 1 reruns opens on v2.
+
+        Additive-migrations invariant: upgrading never rewrites or drops
+        v1 data — it only adds tables and triggers.
+        """
+        from tracefield.storage.database import _MIGRATION_1
+
+        path = settings.db_path
+        old = sqlite3.connect(path)
+        old.executescript(_MIGRATION_1)
+        old.execute(
+            "INSERT INTO cases(id,title,created_at,updated_at) VALUES('case_x','x','t1','t1')"
+        )
+        old.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version','1')")
+        old.commit()
+        old.close()
+
+        db = Database(path)  # opens and migrates in __init__
+        assert db.schema_version == 2
+        row = db.execute("SELECT title FROM cases WHERE id='case_x'").fetchone()
+        assert row is not None and row["title"] == "x"
+        # New tables exist and report the guard triggers are installed.
+        names = {
+            r["name"]
+            for r in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%ins'"
+            ).fetchall()
+        }
+        assert {
+            "trg_relations_integrity_ins",
+            "trg_assertions_integrity_ins",
+        } <= names
         db.close()
 
     def test_db_file_permissions(self, settings) -> None:
@@ -88,17 +129,202 @@ class TestRepositories:
             db.commit()
 
     def test_relation_evidence_ids_roundtrip(self, db, case_factory) -> None:
+        """Repo-level roundtrip with REAL record ids — a relation's endpoints
+        and evidence links must all exist in the case (see the v2 integrity
+        guards: invented ids are no longer storable)."""
         case = case_factory()
+        src = SourceRepo(db).add(Source(case_id=case.id, locator="https://example.org/a"))
+        claim = ClaimRepo(db).add(Claim(case_id=case.id, text="c"))
+        ev = EvidenceRepo(db).add(
+            EvidenceItem(
+                case_id=case.id,
+                source_id=src.id,
+                sha256="1" * 64,
+                media_type="text/plain",
+                storage_ref="evidence/x",
+                captured_at="2026-01-01T00:00:00Z",
+            )
+        )
         rel = Relation(
             case_id=case.id,
-            from_id="src_1",
-            to_id="clm_1",
+            from_id=src.id,
+            to_id=claim.id,
             relation=RelationType.SUPPORTS,
-            evidence_ids=["ev_1", "ev_2"],
+            evidence_ids=[ev.id],
         )
         RelationRepo(db).add(rel)
         got = RelationRepo(db).get(rel.id)
-        assert got is not None and got.evidence_ids == ["ev_1", "ev_2"]
+        assert got is not None and got.evidence_ids == [ev.id]
+
+
+class TestSchemaV2IntegrityTriggers:
+    """DB-level referential guards (schema v2): invented, cross-case, or
+    dangling ids are refused at write time as corruption.
+
+    These tests write RAW SQL deliberately — the guards exist to protect
+    against bad data entering below the app layer, so the guard is probed
+    exactly where it stands."""
+
+    @staticmethod
+    def _seed_case(db: Any, case_factory: Any, suffix: str) -> tuple[Any, Any, Any, Any]:
+        case = case_factory(f"trig-{suffix}")
+        src = SourceRepo(db).add(Source(case_id=case.id, locator=f"https://x.test/{suffix}"))
+        claim = ClaimRepo(db).add(Claim(case_id=case.id, text=f"c {suffix}"))
+        ev = EvidenceRepo(db).add(
+            EvidenceItem(
+                case_id=case.id,
+                source_id=src.id,
+                sha256="2" * 64,
+                media_type="text/plain",
+                storage_ref=f"evidence/{suffix}",
+                captured_at="2026-01-01T00:00:00Z",
+            )
+        )
+        return case, src, claim, ev
+
+    def test_relation_endpoint_must_exist_in_same_case(self, db, case_factory) -> None:
+        # Two parallel cases with real records: any case-blind "id exists
+        # somewhere" check would accept the rejected rows below, so every
+        # refusal here proves the same-case filter is enforced.
+        a_case, a_src, a_claim, _a_ev = self._seed_case(db, case_factory, "pe-a")
+        b_case, b_src, b_claim, _b_ev = self._seed_case(db, case_factory, "pe-b")
+        valid = Relation(
+            case_id=a_case.id,
+            from_id=a_src.id,
+            to_id=a_claim.id,
+            relation=RelationType.SUPPORTS,
+        )
+        RelationRepo(db).add(valid)  # the repo path with real ids passes
+        bad_froms = [
+            (a_case, b_src.id),  # exists, wrong case
+            (a_case, "src_invented"),  # does not exist at all
+            (b_case, a_claim.id),  # mirrored direction, still cross-case
+        ]
+        for case, endpoint in bad_froms:
+            with pytest.raises(sqlite3.IntegrityError, match="from_id must reference"):
+                db.execute(
+                    "INSERT INTO relations(id,case_id,from_id,to_id,relation,"
+                    "created_at) VALUES(?,?,?,?,?,?)",
+                    ("rel_x", case.id, endpoint, endpoint, "supports", "t"),
+                )
+                db.commit()
+        # Cross-case or invented to_id with a valid from_id: refused too.
+        with pytest.raises(sqlite3.IntegrityError, match="to_id must reference"):
+            db.execute(
+                "INSERT INTO relations(id,case_id,from_id,to_id,relation,"
+                "created_at) VALUES(?,?,?,?,?,?)",
+                ("rel_y", a_case.id, a_src.id, b_claim.id, "supports", "t"),
+            )
+            db.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="to_id must reference"):
+            db.execute(
+                "INSERT INTO relations(id,case_id,from_id,to_id,relation,"
+                "created_at) VALUES(?,?,?,?,?,?)",
+                ("rel_z", a_case.id, a_src.id, "clm_invented", "supports", "t"),
+            )
+            db.commit()
+        # The valid row is untouched by the refusals.
+        assert RelationRepo(db).get(valid.id) is not None
+
+    def test_relation_endpoint_update_is_guarded_too(self, db, case_factory) -> None:
+        a_case, a_src, a_claim, _a_ev = self._seed_case(db, case_factory, "upd-a")
+        b_case, b_src, _b_claim, _b_ev = self._seed_case(db, case_factory, "upd-b")
+        rel = RelationRepo(db).add(
+            Relation(
+                case_id=a_case.id,
+                from_id=a_src.id,
+                to_id=a_claim.id,
+                relation=RelationType.SUPPORTS,
+            )
+        )
+        # Rewire the relation to a cross-case endpoint: refused.
+        with pytest.raises(sqlite3.IntegrityError, match="to_id must reference"):
+            db.execute("UPDATE relations SET to_id=? WHERE id=?", (b_src.id, rel.id))
+            db.commit()
+        # Moving the row to another case leaves its endpoints behind: refused.
+        with pytest.raises(sqlite3.IntegrityError, match="from_id must reference"):
+            db.execute("UPDATE relations SET case_id=? WHERE id=?", (b_case.id, rel.id))
+            db.commit()
+        # Same-case rewiring stays legal.
+        a_claim2 = ClaimRepo(db).add(Claim(case_id=a_case.id, text="c2"))
+        db.execute("UPDATE relations SET to_id=? WHERE id=?", (a_claim2.id, rel.id))
+        db.commit()
+        assert RelationRepo(db).get(rel.id).to_id == a_claim2.id
+
+    def test_relation_evidence_ids_guard(self, db, case_factory) -> None:
+        a_case, a_src, a_claim, a_ev = self._seed_case(db, case_factory, "ev-a")
+        b_case, _b_src, _b_claim, b_ev = self._seed_case(db, case_factory, "ev-b")
+        bad_cases = [
+            "not-json",  # invalid JSON
+            "[1]",  # non-text element
+            f'["{b_ev.id}"]',  # existing id, other case
+            f'["{a_ev.id}","{b_ev.id}"]',  # mixed: one dangling for this case
+            "[]extra",  # truncated JSON
+        ]
+        for raw in bad_cases:
+            with pytest.raises(
+                sqlite3.IntegrityError, match="must be valid JSON listing evidence ids"
+            ):
+                db.execute(
+                    "INSERT INTO relations(id,case_id,from_id,to_id,relation,"
+                    "evidence_ids,created_at) VALUES(?,?,?,?,?,?,?)",
+                    ("rel_e", a_case.id, a_src.id, a_claim.id, "supports", raw, "t"),
+                )
+                db.commit()
+        # Valid: the real same-case evidence id.
+        db.execute(
+            "INSERT INTO relations(id,case_id,from_id,to_id,relation,evidence_ids,"
+            "created_at) VALUES(?,?,?,?,?,?,?)",
+            ("rel_ok", a_case.id, a_src.id, a_claim.id, "supports", f'["{a_ev.id}"]', "t"),
+        )
+        db.commit()
+        # Cross-case reference update: refused.
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "UPDATE relations SET evidence_ids=? WHERE id=?", (f'["{b_ev.id}"]', "rel_ok")
+            )
+            db.commit()
+        del b_case
+
+    def test_assertion_guards(self, db, case_factory) -> None:
+        from tracefield.core.domain import Assertion
+
+        a_case, _a_src, a_claim, a_ev = self._seed_case(db, case_factory, "as-a")
+        _b_case, _b_src, b_claim, b_ev = self._seed_case(db, case_factory, "as-b")
+        # Dangling evidence in an assertion — refused.
+        with pytest.raises(sqlite3.IntegrityError, match=r"assertions\.evidence_ids"):
+            db.execute(
+                "INSERT INTO assertions(id,case_id,claim_id,statement,method,"
+                "evidence_ids,created_at) VALUES(?,?,?,?,?,?,?)",
+                ("asr_x", a_case.id, a_claim.id, "s", "analyst", f'["{b_ev.id}"]', "t"),
+            )
+            db.commit()
+        # Cross-case claim link — refused.
+        with pytest.raises(sqlite3.IntegrityError, match=r"assertions\.claim_id"):
+            db.execute(
+                "INSERT INTO assertions(id,case_id,claim_id,statement,method,"
+                "evidence_ids,created_at) VALUES(?,?,?,?,?,?,?)",
+                ("asr_y", a_case.id, b_claim.id, "s", "analyst", "[]", "t"),
+            )
+            db.commit()
+        # Valid assertion (repo path) with real same-case refs.
+        asr = AssertionRepo(db).add(
+            Assertion(
+                case_id=a_case.id,
+                claim_id=a_claim.id,
+                statement="A interprets the evidence",
+                evidence_ids=[a_ev.id],
+            )
+        )
+        got = AssertionRepo(db).list_for_case(a_case.id)
+        assert [a.id for a in got] == [asr.id]
+        # Dangling evidence afterward is refused on UPDATE.
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "UPDATE assertions SET evidence_ids=? WHERE id=?",
+                (json.dumps([b_ev.id]), asr.id),
+            )
+            db.commit()
 
 
 class TestWorkspace:

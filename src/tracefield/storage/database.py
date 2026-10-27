@@ -14,7 +14,10 @@ from typing import Any
 
 from tracefield import SCHEMA_VERSION
 
-assert SCHEMA_VERSION == 1, "add a migration for a new schema version"
+# Tripwire: a SCHEMA_VERSION bump is only valid together with a matching
+# stepwise migration in _MIGRATIONS below — every past version must remain
+# rerunnable so old databases keep opening.
+assert SCHEMA_VERSION == 2, "add a migration for the new schema version"
 
 _MIGRATION_1 = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -223,7 +226,176 @@ BEGIN
 END;
 """
 
-_MIGRATIONS: dict[int, str] = {1: _MIGRATION_1}
+_MIGRATION_2 = """
+-- Schema v2: dissemination controls (OOVS-09) and DB-level referential
+-- integrity guards. Additive only — new tables and triggers, no column or
+-- data changes anywhere, so a v1 database migrates without rewriting it.
+
+-- Report identity register: every materially rendered report gets a
+-- durable identity row (FS-17 supporting machinery, OOVS-09).
+CREATE TABLE IF NOT EXISTS case_reports (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    supersedes TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(case_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_case_reports_case ON case_reports(case_id);
+
+-- Analyst-recorded corrections, addressed at a specific report id.
+CREATE TABLE IF NOT EXISTS report_corrections (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    corrected_report_id TEXT NOT NULL REFERENCES case_reports(id) ON DELETE CASCADE,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_report_corrections_case ON report_corrections(case_id);
+
+-- Shipment register (OOVS-09): which recipient received which report, and
+-- when. Recipient follow-up (a correction reaching previous recipients) is
+-- an operator action informed by `report history`; nothing here sends mail.
+CREATE TABLE IF NOT EXISTS dissemination (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    report_id TEXT NOT NULL REFERENCES case_reports(id) ON DELETE CASCADE,
+    recipient TEXT NOT NULL,
+    shipped_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_dissemination_case ON dissemination(case_id);
+
+-- DB-level integrity guards (A1/R-A1-5, A4/R-A4-5): relation endpoints and
+-- JSON-bound evidence references are validated at write time, treating a
+-- missing, cross-case, or invented id as corruption rather than allowing
+-- the row in. The guards cover NEW writes only; running this migration
+-- does not retro-validate rows written before it existed.
+CREATE TRIGGER IF NOT EXISTS trg_relations_integrity_ins
+BEFORE INSERT ON relations
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM sources WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM evidence WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM claims WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM observations WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM assertions WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM origin_clusters WHERE id = NEW.from_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'relations.from_id must reference a record in the same case') END;
+
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM sources WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM evidence WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM claims WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM observations WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM assertions WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM origin_clusters WHERE id = NEW.to_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'relations.to_id must reference a record in the same case') END;
+
+    SELECT CASE
+        WHEN NEW.evidence_ids != '[]' AND NOT (
+            json_valid(NEW.evidence_ids)
+            AND NOT EXISTS (
+                SELECT 1 FROM json_each(NEW.evidence_ids) el
+                WHERE el.type != 'text'
+                   OR NOT EXISTS (
+                        SELECT 1 FROM evidence e
+                        WHERE e.id = el.value AND e.case_id = NEW.case_id
+                    )
+            )
+        )
+        THEN RAISE(ABORT, 'relations.evidence_ids must be valid JSON listing evidence ids in the same case') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_relations_integrity_upd
+BEFORE UPDATE OF from_id, to_id, evidence_ids, case_id ON relations
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM sources WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM evidence WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM claims WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM observations WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM assertions WHERE id = NEW.from_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM origin_clusters WHERE id = NEW.from_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'relations.from_id must reference a record in the same case') END;
+
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM sources WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM evidence WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM claims WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM observations WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM assertions WHERE id = NEW.to_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM origin_clusters WHERE id = NEW.to_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'relations.to_id must reference a record in the same case') END;
+
+    SELECT CASE
+        WHEN NEW.evidence_ids != '[]' AND NOT (
+            json_valid(NEW.evidence_ids)
+            AND NOT EXISTS (
+                SELECT 1 FROM json_each(NEW.evidence_ids) el
+                WHERE el.type != 'text'
+                   OR NOT EXISTS (
+                        SELECT 1 FROM evidence e
+                        WHERE e.id = el.value AND e.case_id = NEW.case_id
+                    )
+            )
+        )
+        THEN RAISE(ABORT, 'relations.evidence_ids must be valid JSON listing evidence ids in the same case') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_assertions_integrity_ins
+BEFORE INSERT ON assertions
+BEGIN
+    SELECT CASE WHEN NEW.claim_id != '' AND NOT EXISTS (
+        SELECT 1 FROM claims WHERE id = NEW.claim_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'assertions.claim_id must reference a claim in the same case') END;
+
+    SELECT CASE
+        WHEN NEW.evidence_ids != '[]' AND NOT (
+            json_valid(NEW.evidence_ids)
+            AND NOT EXISTS (
+                SELECT 1 FROM json_each(NEW.evidence_ids) el
+                WHERE el.type != 'text'
+                   OR NOT EXISTS (
+                        SELECT 1 FROM evidence e
+                        WHERE e.id = el.value AND e.case_id = NEW.case_id
+                    )
+            )
+        )
+        THEN RAISE(ABORT, 'assertions.evidence_ids must be valid JSON listing evidence ids in the same case') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_assertions_integrity_upd
+BEFORE UPDATE OF claim_id, evidence_ids, case_id ON assertions
+BEGIN
+    SELECT CASE WHEN NEW.claim_id != '' AND NOT EXISTS (
+        SELECT 1 FROM claims WHERE id = NEW.claim_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'assertions.claim_id must reference a claim in the same case') END;
+
+    SELECT CASE
+        WHEN NEW.evidence_ids != '[]' AND NOT (
+            json_valid(NEW.evidence_ids)
+            AND NOT EXISTS (
+                SELECT 1 FROM json_each(NEW.evidence_ids) el
+                WHERE el.type != 'text'
+                   OR NOT EXISTS (
+                        SELECT 1 FROM evidence e
+                        WHERE e.id = el.value AND e.case_id = NEW.case_id
+                    )
+            )
+        )
+        THEN RAISE(ABORT, 'assertions.evidence_ids must be valid JSON listing evidence ids in the same case') END;
+END;
+"""
+
+_MIGRATIONS: dict[int, str] = {1: _MIGRATION_1, 2: _MIGRATION_2}
 
 
 class SchemaVersionError(RuntimeError):
