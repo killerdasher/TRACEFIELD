@@ -67,7 +67,10 @@ it — live-network behaviour is exercised manually and via fixtures).
 > updated to grant first — SSRF coverage unchanged. OOVS mapping: `-01`
 > promoted `NOT_ASSESSED` → `PASS (scoped)` with ledger/gate evidence,
 > `-09` verdict held `FAIL` (mechanism shipped; author string + acceptance
-> test still outstanding). Details and commit list:
+> test still outstanding). Watched CI on the pushed commit `7958fa3`:
+> Actions run `40531044503` **success** (321 passed on all three pythons,
+> 0 skipped, exiftool installed) and CodeQL `40531045015` **success** —
+> both watched to completion. Details and commit list:
 > `PHASE_11_SCOPE_REPORT_INTEGRITY.md`.
 
 ## Codebase size (measured)

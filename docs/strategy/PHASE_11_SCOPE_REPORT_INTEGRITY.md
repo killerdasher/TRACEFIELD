@@ -123,7 +123,19 @@ was updated to grant first — the SSRF coverage itself is unchanged.
    scope (`tool_fingerprint` digest binding; `catalog`/`providers` table
    wire-or-drop) — open, not user-gated.
 
-## 8. Honesty notes
+## 8. Watched CI verification
+
+| Workflow | Run | Commit | Result |
+|---|---|---|---|
+| CI (`test py3.11/3.12/3.13`, `lint`, `typecheck`, `dependency audit`) | `40531044503` | `7958fa3` | **success** — **321 passed** on all three pythons, 0 skipped (exiftool installed in CI) |
+| CodeQL | `40531045015` | `7958fa3` | **success** |
+| CI run for the verification-note commit | — | final HEAD | recorded in `IMPLEMENTATION_STATUS.md` after being watched |
+
+Policy unchanged from Phase 10: no "CI green" statement without a passing
+Actions run for that exact commit. The second push (this note) is watched the
+same way locally; its green status is recorded in `IMPLEMENTATION_STATUS.md`.
+
+## 9. Honesty notes
 
 - The `catalog stale` listing does **not** imply any catalogue row was
   contacted or verified this phase — it is computed from shipped dates.
@@ -131,5 +143,5 @@ was updated to grant first — the SSRF coverage itself is unchanged.
   updated to record a grant first rather than weakening the gate or the
   SSRF tests.
 - The Phase 11 commits were pushed to `origin/main` after the local gates
-  above; the CI claim is recorded separately only after a watched Actions
-  run for the exact pushed commit (same policy as Phase 10).
+  above; both Actions runs were watched to completion for the pushed commit
+  (CI `40531044503`, CodeQL `40531045015` — see §8).
