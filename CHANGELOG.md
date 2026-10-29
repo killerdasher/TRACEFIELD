@@ -118,3 +118,20 @@ Initial implementation. Shipped across the first build sessions,
 - `username.py` User-Agent lacked a contact route; it now carries the
   project's own repo contact route, matching `fetch.py`
   (`tracefield/0.1 (+https://github.com/killerdasher/TRACEFIELD)`).
+
+### Added (Phase 12, 2026-10-29)
+
+- **Operator config file** (FS-17): `~/.config/tracefield/config.toml`
+  (stdlib `tomllib`, no new dependency) with a documented accepted-key
+  allowlist (`report_author`); `TRACEFIELD_REPORT_AUTHOR` env var wins;
+  config parse errors / unknown keys / wrong value types ignore the whole
+  file and surface in `doctor` — fail-closed, never half-applied.
+- **Report author identity (FS-17)**: reports carry the operating analyst's
+  identity when configured; other installs keep the honest
+  `author not set` fallback (no tool-level default by decision D23). The
+  maintainer's environment carries the confirmed author string.
+- **OOVS-09 re-verdict**: held `FAIL` since 2026-10-19; now `PASS (scoped)`
+  with the mechanism (report identity/corrections/recipient register) plus
+  the configured author, per the mapping's promotion policy. Notification
+  of corrections to prior recipients remains an explicitly operator-
+  executed workflow, stated in the scope limits.

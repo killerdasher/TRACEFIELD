@@ -74,6 +74,20 @@ case (`tracefield case authorize <case> --scope "<text>" --authorized-by
 re-validated per request and per redirect, and connections are pinned to
 pre-validated addresses.
 
+### Author identity (per operator)
+
+Reports assert whose analysis they are. Set it once, in **your** operator
+config — `~/.config/tracefield/config.toml`:
+
+```toml
+report_author = "your name — your contact route"
+```
+
+`TRACEFIELD_REPORT_AUTHOR` overrides it. Accepted keys are allowlisted and
+config errors fail closed (`tracefield doctor` shows the effective author and
+any config problem). There is deliberately no tool-wide default author: an
+unset report says `author not set`, never someone else's name.
+
 ### Synthetic demonstration transcript
 
 Excerpt from the labelled synthetic fixture case (identical flow exercised by
@@ -105,7 +119,7 @@ manifest OK — N files re-hashed, all intact
 | Claims, relations, analyst review, `analyze claim` | **implemented** | Decision table pinned by tests; `RULE_VERSION` recorded |
 | Origin clustering (containment r3) | **implemented** | Ordered k=3/4/5 shingles; advisory `related_text` edges |
 | Contradiction candidates (dates/digests/quantities) | **implemented** | Always severity `candidate`; requires review |
-| Reports (Markdown/JSON/HTML) with caveats + versions | **implemented** | HTML is self-contained, fully escaped, no external resources; reports carry a durable identity (report_id/revision/supersedes) and corrections travel with the lineage; `case-export --recipient` records shipments (dissemination register) |
+| Reports (Markdown/JSON/HTML) with caveats + versions | **implemented** | HTML is self-contained, fully escaped, no external resources; reports carry a durable identity (report_id/revision/supersedes) and corrections travel with the lineage; `case-export --recipient` records shipments (dissemination register); the operating analyst's author identity is carried when configured (per-operator config file or `TRACEFIELD_REPORT_AUTHOR`) — unset installs honestly print `author not set` |
 | Report corrections & history | **implemented** | `report-correct` appends corrections (never silent rewrites); `report-history` lists revisions, corrections, recorded shipments; recipients of prior revisions are notified by the operator — the register makes it traceable, nothing is automated |
 | Scope authorization ledger | **implemented** | `case authorize/case scope`; `source add --fetch` requires an active recorded grant; records authority, does not grant it |
 | `hash` / `inspect [--deep]` / `ocr` | **implemented** | Backends optional; UNAVAILABLE is honest |

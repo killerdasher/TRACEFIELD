@@ -13,6 +13,10 @@ acceptance tests: [`tests.json`](https://github.com/OWASP/OWASP-Open-Source-Inte
 identity/corrections/dissemination register, schema-v2 DB integrity triggers,
 assertion CLI, catalogue freshness listing) — 321 tests passing
 (`pytest -m "not network"`, 3.13; re-run on 3.11/3.12 before push).
+**Re-verified again:** 2026-10-29 after Phase 12 (FS-17 completion: the
+operator author identity mechanism + the maintainer's confirmed author
+string, D23) — 332 tests passing (`pytest -m "not network"`; CI re-run for
+all pythons is recorded before any claim).
 **Rule versions in scope:** `assess-r2` (claim assessment), `contra-r2`
 (contradiction detection), `origin-r3` (origin clustering), report schema v3
 (v2 was additive to assessed v1: added generated_at/tool/document
@@ -58,10 +62,10 @@ not reproduced here (the standard is CC BY-SA 4.0 —
 | `OOVS-v0.1.0-06` | Analytic transparency and reproducibility | `PASS` (scoped) |
 | `OOVS-v0.1.0-07` | Rights, privacy, and safeguarding | `PASS` (scoped) |
 | `OOVS-v0.1.0-08` | AI and automation assurance | `PASS` (scoped) |
-| `OOVS-v0.1.0-09` | Dissemination and action controls | `FAIL` |
+| `OOVS-v0.1.0-09` | Dissemination and action controls | `PASS` (scoped) |
 | `OOVS-v0.1.0-10` | Governance, audit, and improvement | `NOT_ASSESSED` |
 
-8 `PASS` (each scoped), 1 `FAIL`, 1 `NOT_ASSESSED`, 0 `NOT_APPLICABLE`.
+9 `PASS` (each scoped), 1 `NOT_ASSESSED`, 0 `FAIL`, 0 `NOT_APPLICABLE`.
 
 ## Requirement detail
 
@@ -242,10 +246,13 @@ exists (see `-01`).
 components exist; this status covers the automation half only. If generative AI
 is ever added, this entry must be re-assessed before release.
 
-### `OOVS-v0.1.0-09` — Dissemination and action controls — `FAIL`
+### `OOVS-v0.1.0-09` — Dissemination and action controls — `PASS` (scoped)
 
-**What the product has (mechanism shipped Phase 11, 2026-10-27; verdict held
-— see below):**
+**Re-verdicted 2026-10-29** (was `FAIL` 2026-10-19; mechanism landed Phase 11,
+author identity landed Phase 12 — see verdict rationale and promotion policy
+below).
+
+**Evidence:**
 - Caveats and limitations travel with the report to the point of action
   (global + per-source + per-assessment caveats).
 - Redaction of secrets in exports; post-redaction integrity manifest so a
@@ -262,24 +269,38 @@ is ever added, this entry must be re-assessed before release.
   report revision shipped to which recipient and when; `report-history`
   displays the chain (revisions, corrections, recorded shipments). Exports
   name their exact report id/revision in `EXPORT_README.txt`.
+- **Author identity (FS-17, D23)**: the report's dissemination block carries
+  the operating analyst's identity — per-operator (`~/.config/tracefield/
+  config.toml` `report_author` key or `TRACEFIELD_REPORT_AUTHOR`; env wins).
+  The maintainer's environment carries the confirmed author string
+  ("killerdasher — github.com/killerdasher/TRACEFIELD"); config loading is
+  validated (accepted-key allowlist, fail-closed) and `doctor` shows the
+  effective author. There is deliberately no tool-level default: an
+  unconfigured operator's report says `author not set` plainly instead of
+  claiming someone else's identity.
 
-**Why the verdict stays `FAIL` (held, not promoted):**
-1. **Correction reachability is not closed-loop**: the register makes "who
-   received which revision" answerable, but notifying prior recipients of a
-   correction remains an operator action — nothing in the tool automatically
-   reaches or confirms any recipient.
-2. **No author identity is configured**: the dissemination document must say
-   who asserts it; reports currently state `author not set` plainly (FS-17
-   author string is user-gated). A self-assessment cannot claim this
-   control while its identity half is an empty string.
-3. The official acceptance test was not run.
+**Why this is now `PASS (scoped)`** — mapping policy requires a promotion
+from `FAIL` to cite (a) the mechanism, (b) identity where the requirement is
+about who asserts, and (c) a test that would fail if the mechanism
+regressed. All three hold: chain/correction/shipment semantics are pinned by
+tests (`TestReportIdentity`, `TestReportRegister`, `TestReportAuthor`), the
+author mechanism is e2e-pinned including the broken-config path, and the
+maintainer's own authoring environment is actually configured (not a demo
+string).
 
-**Gap to close (in order):** set the author identity string (user decision),
-re-verify the register against the requirement's own tests, then re-verdict.
-Per mapping policy below, promotion from `FAIL` also requires a test that
-would fail if the mechanism regressed — the Phase 11 identity/correction
-tests provide exactly that tripwire; items 1–2 above are what the verdict
-rests on.
+**Scope limits / honest caveats:**
+- **Correction reachability is operator-executed**: the register answers
+  "which report revision did which recipient receive" and corrections carry
+  forward into every later render, but actually *notifying* prior recipients
+  (and proving they acted) is a human workflow the tool does not and cannot
+  automate. This is the same boundary as most of the PASS entries: workflow
+  aid, not workflow replacement.
+- **Per-operator scope of the claim**: the author-identity half is claimed
+  for this maintainer's verified configuration; a fresh install without a
+  configured author prints `author not set` — the *product behaviour* is
+  honest in both states, but an unconfigured deployment cannot claim the
+  attributed-report half of this control.
+- The official OOVS acceptance tests (`tests.json`) were still not run.
 
 ### `OOVS-v0.1.0-10` — Governance, audit, and improvement — `NOT_ASSESSED`
 

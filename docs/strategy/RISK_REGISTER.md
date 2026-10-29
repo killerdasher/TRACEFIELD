@@ -9,6 +9,8 @@
 > Phase 11 refresh (2026-10-27): C3/R-C3-1, A1/R-A1-5, A4/R-A4-5, C3/R-C3-5,
 > and FS-20-related A3/R-A3-4 updated with dated evidence; C1/R-C1-2 partially
 > addressed (corrections/identity shipped; author string still user-gated).
+> Phase 12 continuation (2026-10-29): C1/R-C1-2 → Fixed — the author identity
+> landed (config-file mechanism + maintainer-confirmed string), completing FS-17.
 
 ## Critical / High
 
@@ -48,7 +50,7 @@
 | A4/R-A4-4 | Whole-case cluster count fired caveats on every claim | Medium | **Fixed** | Per-claim cluster membership computed from supporting origins |
 | A4/R-A4-5 | Assertion `evidence_ids` TEXT column, no dangling check | Medium | **Fixed (Phase 11, 2026-10-27)** | `assertion add/list/review` CLI wired over `AssertionRepo` (previously creation was impossible); assertions gain the same schema-v2 DB guard (`trg_assertions_integrity_{ins,upd}`): `claim_id` same-case, `evidence_ids` JSON same-case |
 | A4/R-A4-6 | `attach_file` read whole file into memory | Medium | **Fixed** | Streamed copy (`shutil.copyfileobj`); clustering size guard with explicit skip |
-| C1/R-C1-2 | Report defensibility gaps (no generated_at/version/author) | Medium | **Mitigated** | Report carries `generated_at`, tool version, rule version, caveats. Phase 11 (2026-10-27) shipped the identity machinery: durable report_id/revision/supersession register + corrections carried forward along the lineage (schema v2, report schema v3). **Still open:** the author string itself is user-gated (FS-17); until set, reports say `author not set` plainly |
+| C1/R-C1-2 | Report defensibility gaps (no generated_at/version/author) | Medium | **Fixed (Phase 12, 2026-10-29)** | FS-17 complete: reports carry a durable report_id/revision/supersession register + lineage corrections (Phase 11) **and** the operator's author identity (config file `report_author` / `TRACEFIELD_REPORT_AUTHOR`; fail-closed config loading, doctor-visible). The maintainer's environment is configured; other operators keep the honest `author not set` fallback until they set their own — per D23, no tool-level default exists |
 | C1/R-C1-4 | Absolute paths leak filesystem structure in reports | Medium | **Mitigated** | Report renders source locators through `s()`; path redaction beyond that is **open** |
 | C1/R-C1-5 | Event digest omits `tool_fingerprint`; `case-delete` appends no event | Medium | **Mitigated** | Delete appends an event; `occurred_at` **is** bound (audit F4; earlier note was stale); `tool_fingerprint` remains unbound (FS-24, P3 — not part of the Phase 11 schema v2, which was additive tables+triggers to avoid breaking existing chains) |
 | C2/R-C2-3 | Near-dup detection failed both directions; Latin-only | Medium | **Fixed** | origin-r3 containment + Unicode tokenization; fixtures pin both |

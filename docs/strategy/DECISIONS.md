@@ -343,3 +343,32 @@ kind of unverifiable claim the project refuses to make. Instead:
   operator-manual workflow; `health_result` remains unclaimed by the tool.
 - Consequence accepted: no automated staleness detection beyond the listing.
   Risk-register row A3/R-A3-4 carries the residual as **Accepted (decided)**.
+
+## D23 — The report author is the operator (FS-17 closed), identity never automated
+
+FS-17 required a real author identity before the dissemination document
+block could claim authorship. Resolved 2026-10-29:
+
+- **The maintainer supplied and confirmed the string** —
+  `killerdasher — github.com/killerdasher/TRACEFIELD` — after being asked
+  explicitly what reports should carry. It was not invented, not defaulted,
+  and not taken from git metadata: authorship is a claim, and only the
+  author can make it.
+- **Per-operator, never tool-level**: the identity lives in the operator's
+  config file (`~/.config/tracefield/config.toml`, `report_author` key;
+  `TRACEFIELD_REPORT_AUTHOR` env var wins). This project deliberately
+  refuses a shipped default author: anyone else's install would then stamp
+  the maintainer's identity onto reports about their evidence — a false
+  attribution, the exact failure mode the honesty rules exist to prevent.
+  Unconfigured operators get `author not set` — an unattributed report is
+  honest about being unattributed.
+- **Config loading is validated and fail-closed** (accepted-key allowlist,
+  valid-TOML required; violations ignore the whole file and surface in
+  `doctor`). A typo must never silently half-apply an identity, and never
+  crash reporting.
+- **OOVS-09 re-verdict**: with (a) the register/corrections/recipient
+  machinery (D21), (b) the configured + confirmed author, and (c)
+  regression-pinning tests for all of it, the self-assessment promotes
+  OOVS-09 to `PASS (scoped)` with explicit limits — recipient *notification*
+  of a correction stays a human workflow the tool supports but does not
+  automate, and official acceptance tests remain unrun.

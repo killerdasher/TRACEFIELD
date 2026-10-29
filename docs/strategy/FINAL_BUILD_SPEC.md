@@ -64,13 +64,13 @@
 | FS-26 | WIX/Eagle comparison inputs (git pin; license file) once unblocked | audit §7 | P3 |
 | FS-27 | "200+ OSINT tools" repo comparison once the user supplies the URL | register open question | P3 |
 
-\* FS-17 needs a user-supplied author identity before it can complete (§8).
-**Phase 11 status (2026-10-27):** the FS-17 machinery is shipped — durable
-report identity (report_id/revision/supersedes record, schema v2), corrections
-addressed at specific reports and carried forward with the lineage, and the
-export names its shipped revision + recipient. Reports state `author not set`
-honestly until the user supplies the identity string. FS-18/FS-19/FS-20 also
-landed in Phase 11 (see milestone rows below).
+\* FS-17 needed a user-supplied author identity before it could complete (§8).
+**RESOLVED (Phase 12, 2026-10-29):** the maintainer supplied the identity and
+confirmed its use on reports; FS-17 is complete. The FS-11…FS-17 machinery:
+report identity register + corrections + recipient register (Phase 11) and
+the operator-config-file author mechanism (Phase 12) both shipped and are
+test-pinned; the maintainer's environment carries the confirmed string while
+other installs keep the honest `author not set` fallback (D23).
 
 ## 4. Milestones
 
@@ -78,7 +78,7 @@ landed in Phase 11 (see milestone rows below).
 |---|---|---|---|
 | **M0 — Honest artifact** | FS-01…FS-09 | G1–G7 all green **including fresh-venv wheel install**; TUI probe rerun shows zero docstring/bindings drift; docs contain no stale claims (audit §8 list empty) | **GREEN** — pytest 292/ruff/mypy clean; G7 fixed + fresh-venv catalogue commands exit 0; TUI keymap-parity + drift fixes landed; §8 doc corrections landed (Phases 6–8) |
 | **M1 — Complete & cancellable** | FS-10…FS-16, FS-18 | J1–J5 journeys green; fault-tolerance suite green; redirect-pinning test against a local two-hop server green; migrate-refusal test green; all prior gates | **GREEN** — J1–J5 + FS-15 suite + redirect re-pin + migrate-refusal all green (Phases 6–7). **Correction (Phase 11, 2026-10-27):** FS-18 landed — the `username.py` User-Agent now carries the project's own contact route (`+https://github.com/killerdasher/TRACEFIELD`, matching `fetch.py`); no user input was required (the repo URL is the project's canonical address); a different contact route remains a one-line swap if the user prefers |
-| **M2 — Defensible dissemination** | FS-17, FS-19…FS-23 | Report renders author/revision/corrections (fixture test); OOVS mapping updated with `-09` re-verdict; theme/NO_COLOR tests; catalogue health or D7 drop decided | **SUBSTANTIALLY SHIPPED (Phase 11, 2026-10-27)** — FS-19 done (schema-v2 DB triggers enforce same-case relation endpoints + same-case JSON evidence/claim guards at write time); FS-20 decided and shipped (`catalog stale` freshness listing; operator-manual verification — D22, no automated health job); FS-17 machinery done (register/corrections/dissemination; OOVS mapping updated with the measured mechanism state, `-09` verdict held pending the user author string + re-check); FS-21/FS-22 already landed (Phase 6) and unchanged; **still open:** FS-17 author string (user-gated), FS-23 licence fields |
+| **M2 — Defensible dissemination** | FS-17, FS-19…FS-23 | Report renders author/revision/corrections (fixture test); OOVS mapping updated with `-09` re-verdict; theme/NO_COLOR tests; catalogue health or D7 drop decided | **SHIPPED except FS-23 (2026-10-29)** — FS-19 done (Phase 11, DB integrity triggers); FS-20 decided + shipped (`catalog stale`, D22); **FS-17 DONE (Phase 12, 2026-10-29)** — author identity + register + corrections + recipient register all test-pinned, and **OOVS-09 re-verdicted `PASS (scoped)`** in the mapping (promotion policy satisfied: mechanism + configured author + regression-pinning tests); FS-21/FS-22 landed (Phase 6); **only FS-23 (catalogue licence fields, tier-first) remains open in this milestone** |
 | **M3 — Expansion** | FS-24…FS-27 | schema v2 migration + chain-compat note; pHash fixture test; comparison rows appended to `COMPETITOR_MATRIX.md` with dated sources | **OPEN, partially advanced (Phase 11, 2026-10-27)** — a first additive schema-v2 step landed (report-identity/correction/dissemination registers + DB integrity triggers, additive-only migration from v1 with idempotent + data-survival tests); FS-24's remaining scope (**bind `tool_fingerprint` in digests; wire-or-drop the existing `catalog`/`providers` tables**) is still open; FS-25 pHash, FS-26/FS-27 comparison inputs still open (FS-26/27 user-gated) |
 
 Sequencing rule: no milestone opens until the previous one's exit gate is
@@ -121,10 +121,12 @@ self-assessment until official tests are run.
 ## 8. Open decisions requiring the user
 
 1. **URL of the "200+ OSINT tools" GitHub repository** (P3 input; not guessed).
-2. **Report author identity string** (person/project name + contact) — the
-   FS-17 machinery shipped in Phase 11 (register, corrections, dissemination;
-   reports honestly say `author not set`); the identity string itself is the
-   remaining user-gated input. OOVS-09 re-verdict is deferred until it lands.
+2. **Report author identity string** — **RESOLVED (2026-10-29)**: the
+   maintainer supplied and confirmed `killerdasher —
+   github.com/killerdasher/TRACEFIELD`, persisted per-operator in
+   `~/.config/tracefield/config.toml` (env var overrides; no tool-level
+   default so other operators' reports stay honestly unattributed, D23).
+   FS-17 completed; OOVS-09 re-verdicted `PASS (scoped)`.
 3. **User-Agent contact route** — **satisfied in Phase 11 by the project's own
    repo URL** (`github.com/killerdasher/TRACEFIELD`); if a distinct contact
    address (email/domain) is ever preferred, swapping it is a one-line change.

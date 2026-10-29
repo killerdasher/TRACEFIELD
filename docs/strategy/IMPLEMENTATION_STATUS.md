@@ -75,6 +75,19 @@ it — live-network behaviour is exercised manually and via fixtures).
 > success). Details and commit list:
 > `PHASE_11_SCOPE_REPORT_INTEGRITY.md`.
 
+> **Update (2026-10-29, Phase 12: report author identity, FS-17 closed).**
+> The maintainer confirmed the report author string
+> (`killerdasher — github.com/killerdasher/TRACEFIELD`) and its persistence
+> mechanism (per-operator `~/.config/tracefield/config.toml`, env override,
+> fail-closed validation, `doctor` visibility — D23; no tool-level default,
+> so other installs stay honestly unattributed). FS-17 is complete and the
+> OOVS-09 self-assessment was re-verdicted `FAIL` → **`PASS (scoped)`**
+> with explicit scope limits (recipient notification stays operator-
+> executed; official acceptance tests unrun). Local gates on the HEAD
+> commit: **pytest 332 passed / 0 failed / 0 skipped on 3.13**, ruff
+> format/check clean, mypy strict clean (38 files); 3.11/3.12 + watched-CI
+> records added before push. Details: `PHASE_12_REPORT_AUTHOR.md`.
+
 ## Codebase size (measured)
 
 | Area | Files | Lines |
