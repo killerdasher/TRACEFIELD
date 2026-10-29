@@ -12,9 +12,12 @@ from tracefield.storage import Database
 
 @pytest.fixture()
 def tf_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Isolate TRACEFIELD_HOME so tests never touch the real user data dir."""
+    """Isolate TRACEFIELD_HOME so tests never touch the real user data dir.
+    TRACEFIELD_CONFIG is pointed at a per-test path (initially absent) so the
+    maintainer's real operator config can never leak into a test run."""
     home = tmp_path / "tf-home"
     monkeypatch.setenv("TRACEFIELD_HOME", str(home))
+    monkeypatch.setenv("TRACEFIELD_CONFIG", str(tmp_path / "isolated-config.toml"))
     monkeypatch.delenv("TRACEFIELD_ALLOW_NETWORK", raising=False)
     monkeypatch.delenv("TRACEFIELD_USERNAME_CHECK", raising=False)
     monkeypatch.delenv("TRACEFIELD_ADAPTERS", raising=False)

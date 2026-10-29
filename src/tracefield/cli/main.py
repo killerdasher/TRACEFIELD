@@ -8,6 +8,7 @@ strings are sanitized before terminal rendering; secrets are redacted.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from collections.abc import Callable
@@ -221,6 +222,38 @@ def doctor(
         }
     )
     checks.append({"name": "version", "status": "ok", "detail": __version__})
+
+    # Operator config + effective report author (FS-17): config parse errors
+    # surface here, never silently applied-or-swallowed, and the effective
+    # author is echoed whatever its source (config file or env var).
+    author_src = (
+        "env (TRACEFIELD_REPORT_AUTHOR)"
+        if os.environ.get("TRACEFIELD_REPORT_AUTHOR", "").strip()
+        else ("config file" if settings.config_path.exists() else "unset")
+    )
+    if settings.config_error:
+        checks.append(
+            {
+                "name": "config",
+                "status": "error",
+                "detail": f"{settings.config_path} — {settings.config_error}",
+            }
+        )
+    else:
+        author_part = (
+            f"report author ({author_src}): {s(settings.report_author, 70)}"
+            if settings.report_author
+            else "report author unset — reports will say 'author not set'"
+        )
+        checks.append(
+            {
+                "name": "config",
+                "status": "ok"
+                if (settings.config_path.exists() or settings.report_author)
+                else "missing",
+                "detail": f"{settings.config_path} — {author_part}",
+            }
+        )
 
     try:
         settings.ensure_dirs()

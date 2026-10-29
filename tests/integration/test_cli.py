@@ -6,8 +6,10 @@ entry point (``run()``), so the mapping contract is what ships.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -84,6 +86,35 @@ class TestExitCodes:
         payload = json.loads(out)
         assert isinstance(payload["checks"], list)
         assert payload["checks"], "doctor must run at least one check"
+
+    def test_doctor_reports_config_and_author(self, tf_home, monkeypatch, capsys) -> None:
+        # The tf_home fixture points TRACEFIELD_CONFIG at a per-test path;
+        # absent by default → doctor must say so and the author honest-state.
+        code, out, _ = run_cli_out(monkeypatch, capsys, ["doctor", "--json"])
+        assert code == EXIT_OK
+        payload = json.loads(out)
+        cfg = next(c for c in payload["checks"] if c["name"] == "config")
+        assert cfg["status"] == "missing"
+        assert "author not set" in cfg["detail"]
+
+        # Author identity (FS-17) is carried exactly as configured.
+        monkeypatch.setenv(
+            "TRACEFIELD_REPORT_AUTHOR", "killerdasher — github.com/killerdasher/TRACEFIELD"
+        )
+        code, out, _ = run_cli_out(monkeypatch, capsys, ["doctor", "--json"])
+        payload = json.loads(out)
+        cfg = next(c for c in payload["checks"] if c["name"] == "config")
+        assert cfg["status"] == "ok"
+        assert "killerdasher" in cfg["detail"] and "env" in cfg["detail"]
+
+        # An invalid config file is REPORTED, not swallowed.
+        cfg_path = Path(os.environ.get("TRACEFIELD_CONFIG", "")).resolve()
+        cfg_path.write_text("report_author = [not valid\n", encoding="utf-8")
+        monkeypatch.delenv("TRACEFIELD_REPORT_AUTHOR", raising=False)
+        code, out, _ = run_cli_out(monkeypatch, capsys, ["doctor", "--json"])
+        payload = json.loads(out)
+        cfg = next(c for c in payload["checks"] if c["name"] == "config")
+        assert cfg["status"] == "error" and "not valid TOML" in cfg["detail"]
 
     def test_delete_requires_confirmation(self, tf_home, monkeypatch, capsys) -> None:
         run_cli_out(monkeypatch, capsys, ["case", "create", "gone", "--json"])
@@ -723,3 +754,61 @@ class TestCatalogStale:
         code, out, _ = run_cli_out(monkeypatch, capsys, ["catalog", "stale"])
         assert code == EXIT_OK
         assert "not a health verdict" in " ".join(out.split())
+
+
+class TestReportAuthor:
+    """FS-17 completion: the operator's identity travels into every render."""
+
+    AUTHOR = "killerdasher — github.com/killerdasher/TRACEFIELD"
+
+    def test_env_author_lands_in_report(self, tf_home, monkeypatch, capsys, tmp_path) -> None:
+        monkeypatch.setenv("TRACEFIELD_REPORT_AUTHOR", self.AUTHOR)
+        run_cli_out(monkeypatch, capsys, ["case", "create", "auth-1", "--json"])
+        out_path = tmp_path / "r.json"
+        code, _, _ = run_cli_out(
+            monkeypatch, capsys, ["report", "auth-1", "--format", "json", "--output", str(out_path)]
+        )
+        assert code == EXIT_OK
+        p = json.loads(out_path.read_text(encoding="utf-8"))
+        assert p["document"]["author"] == self.AUTHOR
+        # Author is independent of registration state.
+        run_cli_out(
+            monkeypatch,
+            capsys,
+            ["report", "auth-1", "--format", "json", "--no-register", "--output", str(out_path)],
+        )
+        p0 = json.loads(out_path.read_text(encoding="utf-8"))
+        assert p0["document"]["author"] == self.AUTHOR
+        assert p0["document"]["revision"] == "unregistered"
+
+    def test_config_file_author_lands_in_report(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        # tf_home sets TRACEFIELD_CONFIG to an absent per-test path; writing
+        # it exercises the real file path through the real CLI.
+        cfg_path = Path(os.environ.get("TRACEFIELD_CONFIG", "")).resolve()
+        cfg_path.write_text(f'report_author = "{self.AUTHOR}"\n', encoding="utf-8")
+        run_cli_out(monkeypatch, capsys, ["case", "create", "auth-2", "--json"])
+        out_path = tmp_path / "r.md"
+        code, _, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["report", "auth-2", "--format", "markdown", "--output", str(out_path)],
+        )
+        assert code == EXIT_OK
+        md = out_path.read_text(encoding="utf-8")
+        assert f"**Author:** {self.AUTHOR}" in md
+
+    def test_broken_config_leaves_author_unset_and_exit_ok(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        cfg_path = Path(os.environ.get("TRACEFIELD_CONFIG", "")).resolve()
+        cfg_path.write_text("report_author = [broken\n", encoding="utf-8")
+        run_cli_out(monkeypatch, capsys, ["case", "create", "auth-3", "--json"])
+        out_path = tmp_path / "r.json"
+        code, _, _ = run_cli_out(
+            monkeypatch, capsys, ["report", "auth-3", "--format", "json", "--output", str(out_path)]
+        )
+        assert code == EXIT_OK  # a broken config must not break reporting
+        p = json.loads(out_path.read_text(encoding="utf-8"))
+        assert p["document"]["author"] == "author not set"
