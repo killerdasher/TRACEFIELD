@@ -85,8 +85,11 @@ it — live-network behaviour is exercised manually and via fixtures).
 > with explicit scope limits (recipient notification stays operator-
 > executed; official acceptance tests unrun). Local gates on the HEAD
 > commit: **pytest 332 passed / 0 failed / 0 skipped on 3.13**, ruff
-> format/check clean, mypy strict clean (38 files); 3.11/3.12 + watched-CI
-> records added before push. Details: `PHASE_12_REPORT_AUTHOR.md`.
+> format/check clean, mypy strict clean (38 files)); also **332 passed on
+> each of 3.11 and 3.12 locally** and **332 / 0 / 0 on all three pythons in
+> the watched CI run `40860162983` for the pushed commit** (CodeQL
+> `40860162798` success; both watched to completion).
+> Details: `PHASE_12_REPORT_AUTHOR.md`.
 
 ## Codebase size (measured)
 

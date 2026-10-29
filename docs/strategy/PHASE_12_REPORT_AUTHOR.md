@@ -55,9 +55,10 @@ doctor` shows `config: ok — report author (config file): …` from a real run)
 | `pytest -m "not network"` (3.13) | **332 passed / 0 failed / 0 skipped** (11 new: 7 unit loader-contract, 3 e2e author-in-report, 1 doctor rows) |
 | `ruff format` / `ruff check` | clean |
 | `mypy src` (strict) | clean, 38 files |
-| `pytest` (3.11 / 3.12) | 332 passed on each (recorded before push) |
 | `pip-audit --strict` | clean |
-| CI / CodeQL on pushed commit | watched to success (IDs below) |
+| fresh-venv wheel smoke | `tools status` / `catalog validate` / `doctor` exit 0 from a wheel install |
+| Pushed-commit CI | run `40860162983` **success — 332 passed on all three pythons, 0 skipped** (watched) |
+| Pushed-commit CodeQL | run `40860162798` **success** (watched) |
 
 ## 4. OOVS-09 re-verdict (`FAIL` → `PASS (scoped)`)
 
