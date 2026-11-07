@@ -88,6 +88,10 @@ username_app = typer.Typer(help="Public username checks (opt-in network).", no_a
 adapters_app = typer.Typer(
     help="Typed adapter boundary (local backends, raw returns).", no_args_is_help=True
 )
+caseimport_app = typer.Typer(
+    help="Import operator-supplied tool output (offline; never fetches).",
+    invoke_without_command=True,
+)
 app.add_typer(case_app, name="case")
 app.add_typer(source_app, name="source")
 app.add_typer(claim_app, name="claim")
@@ -100,6 +104,7 @@ app.add_typer(tools_app, name="tools")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(username_app, name="username")
 app.add_typer(adapters_app, name="adapters")
+app.add_typer(caseimport_app, name="case-import")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -723,6 +728,276 @@ def source_list(
                     src["first_seen_at"],
                 )
             console.print(table)
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# source: analyst review actions on ingest candidates (R-SEC-8)
+# ---------------------------------------------------------------------------
+
+
+@source_app.command("promote")
+def source_promote(
+    observation: str = typer.Argument(..., help="Observation ID to promote."),
+    case: str = typer.Option(..., "--case", help="Case ID or title."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Promote one imported observation to a Source row (analyst action).
+
+    No network. The Source records the row's provenance; the URL is copied
+    from the sha-verified immutable evidence, never re-fetched.
+    """
+    from tracefield.ingest import promote_observation
+    from tracefield.ingest.errors import IngestRefusal
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        try:
+            src, event, prov = promote_observation(settings, db, case_obj, observation)
+        except IngestRefusal as exc:
+            fail(f"promote refused ({exc.reason}): {exc}", EXIT_USAGE)
+
+        payload = {
+            "source": src.model_dump(),
+            "event": {"id": event.id, "action": event.action, "digest": event.digest},
+            "provenance": prov.model_dump(),
+        }
+
+        def render(p: dict[str, Any]) -> None:
+            srcd = p["source"]
+            prov = p["provenance"]
+            console.print(f"[green]promoted[/green] observation → source [bold]{srcd['id']}[/bold]")
+            console.print(f"  locator:    {s(srcd['locator'], 90)}")
+            console.print(f"  publisher:  {s(srcd['publisher'], 40)}")
+            console.print(
+                f"  provenance: {prov['tool']} {prov['tool_version']} "
+                f"row={prov['row_no']} exists={s(prov['exists'], 20)} "
+                f"http_status={prov['http_status']} "
+                f"(file sha256 {prov['file_sha256'][:12]})"
+            )
+            console.print(f"  event:      {p['event']['id']} (digest {p['event']['digest'][:12]})")
+            console.print(f"  limitations:{' ' + s(srcd['limitations'], 160)}")
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
+@source_app.command("dismiss")
+def source_dismiss(
+    observation: str = typer.Argument(..., help="Observation ID to dismiss."),
+    case: str = typer.Option(..., "--case", help="Case ID or title."),
+    reason: str = typer.Option("", "--reason", help="Why this candidate is dismissed."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Record a reasoned dismissal of one candidate observation.
+
+    A dismissal without a recorded reason is refused (exit 3): a bare
+    dismissal is an unrecorded judgment.
+    """
+    from tracefield.ingest import dismiss_observation
+    from tracefield.ingest.errors import IngestRefusal
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        try:
+            event = dismiss_observation(db, case_obj, observation, reason)
+        except IngestRefusal as exc:
+            fail(f"dismiss refused ({exc.reason}): {exc}", EXIT_USAGE)
+        payload = {
+            "observation": observation,
+            "event": {"id": event.id, "action": event.action, "digest": event.digest},
+            "reason": reason,
+        }
+
+        def render(p: dict[str, Any]) -> None:
+            console.print(f"[green]dismissed[/green] observation [bold]{p['observation']}[/bold]")
+            console.print(f"  reason: {s(p['reason'], 200)}")
+            console.print(f"  event:  {p['event']['id']} (digest {p['event']['digest'][:12]})")
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
+@source_app.command("defer")
+def source_defer(
+    observation: str = typer.Argument(..., help="Observation ID to defer."),
+    case: str = typer.Option(..., "--case", help="Case ID or title."),
+    reason: str = typer.Option("", "--reason", help="Optional reason for deferring."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Defer one candidate observation (recorded as an event, R-SEC-8)."""
+    from tracefield.ingest import defer_observation
+    from tracefield.ingest.errors import IngestRefusal
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        try:
+            event = defer_observation(db, case_obj, observation, reason)
+        except IngestRefusal as exc:
+            fail(f"defer refused ({exc.reason}): {exc}", EXIT_USAGE)
+        payload = {
+            "observation": observation,
+            "event": {"id": event.id, "action": event.action, "digest": event.digest},
+        }
+
+        def render(p: dict[str, Any]) -> None:
+            console.print(f"[green]deferred[/green] observation [bold]{p['observation']}[/bold]")
+            console.print(f"  event:  {p['event']['id']} (digest {p['event']['digest'][:12]})")
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# case-import: offline ingestion of tool output (B-02/B-03)
+# ---------------------------------------------------------------------------
+
+
+@caseimport_app.callback(invoke_without_command=True)
+def caseimport_callback(
+    ctx: typer.Context,
+    file: Path | None = typer.Option(
+        None,
+        "--file",
+        exists=True,
+        readable=True,
+        dir_okay=False,
+        help="Tool output file to import (e.g. a Sherlock --csv output).",
+    ),
+    case: str | None = typer.Option(None, "--case", help="Case ID or title."),
+    privacy_label: str = typer.Option(
+        "unknown",
+        "--privacy-label",
+        help="Privacy label recorded on the imported evidence copy.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Import a tool output file into a case (offline parse; R-SEC-1..6).
+
+    Grammar note: the file is passed via ``--file`` so the ``status``
+    subcommand stays unambiguous (a group-level positional would swallow
+    the word "status").
+    """
+    if ctx.invoked_subcommand is not None:
+        return  # a subcommand (status) handles itself
+    if file is None:
+        fail("case-import requires --file (or use 'tracefield case-import status')", EXIT_USAGE)
+    if case is None:
+        fail("case-import requires --case", EXIT_USAGE)
+    _run_case_import(Path(file), case, privacy_label, as_json)
+
+
+def _run_case_import(path: Path, case: str, privacy_label: str, as_json: bool) -> None:
+    from tracefield.ingest import run_import
+    from tracefield.ingest.errors import IngestRefusal
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        try:
+            res = run_import(settings, db, case_obj, path, privacy_label=privacy_label)
+        except IngestRefusal as exc:
+            fail(f"import refused ({exc.reason}): {exc}", EXIT_USAGE)
+
+        payload = res.model_dump() | {"case_title": case_obj.title}
+
+        def render(p: dict[str, Any]) -> None:
+            console.print(
+                f"[green]imported[/green] {p['format_name']} — "
+                f"{p['row_count']} observations "
+                f"[bold]{p['source_id']}[/bold]/[bold]{p['evidence_id']}[/bold]"
+            )
+            console.print(f"  sha256:    {p['evidence_sha256']}")
+            console.print(f"  storage:   {s(p['storage_ref'], 80)} (immutable copy)")
+            console.print(
+                f"  version:   {'declared: ' + s(p['declared_version'], 30) if p['declared_version'] else 'not declared by file → recorded as unknown'}"
+            )
+            if p["extra_columns"]:
+                console.print(
+                    f"  [yellow]flag[/yellow] extra_columns: {s(','.join(p['extra_columns']), 100)}"
+                )
+            console.print(f"  event:     {p['event_id']}")
+            console.print(
+                "[dim]observations are raw returns — not verified facts until reviewed[/dim]"
+            )
+
+        emit(payload, as_json, render)
+    finally:
+        db.close()
+
+
+@caseimport_app.command("status")
+def caseimport_status(
+    case: str = typer.Option(..., "--case", help="Case ID or title."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Show the last import event and ingest totals for a case."""
+    from tracefield.storage.repositories import EventRepo
+
+    settings = load_settings()
+    db = open_db(settings)
+    try:
+        case_obj = resolve_case(CaseRepo(db), case)
+        last = EventRepo(db).latest_action(case_obj.id, ("ingest.file",))
+        obs_counts = {
+            r["tool_name"]: r["n"]
+            for r in db.execute(
+                "SELECT tool_name, COUNT(*) AS n FROM observations WHERE case_id=? "
+                "GROUP BY tool_name",
+                (case_obj.id,),
+            ).fetchall()
+        }
+        review_counts = {
+            r["action"]: r["n"]
+            for r in db.execute(
+                "SELECT action, COUNT(*) AS n FROM analysis_events WHERE case_id=? "
+                "AND action LIKE 'candidate.%' GROUP BY action",
+                (case_obj.id,),
+            ).fetchall()
+        }
+        evidence_count = db.execute(
+            "SELECT COUNT(*) AS n FROM evidence WHERE case_id=?", (case_obj.id,)
+        ).fetchone()["n"]
+        payload = {
+            "case_id": case_obj.id,
+            "last_import": last.model_dump() if last else None,
+            "observations_by_tool": obs_counts,
+            "review_actions": review_counts,
+            "evidence_count": evidence_count,
+        }
+
+        def render(p: dict[str, Any]) -> None:
+            li = p["last_import"]
+            if li is None:
+                console.print("no imports recorded for this case")
+            else:
+                console.print(f"[bold]last import[/bold] {li['id']}")
+                console.print(f"  occurred: {li['occurred_at']}")
+                console.print(f"  action:   {li['action']} (digest {li['digest'][:12]})")
+                for item in li["inputs"]:
+                    console.print(f"  input:    {s(item, 100)}")
+            console.print(f"  evidence: {p['evidence_count']}")
+            for tool, n in p["observations_by_tool"].items():
+                console.print(f"  observations: {tool} x {n}")
+            for action, n in (
+                p["review_actions"]
+                if p["review_actions"]
+                else {"(no review actions yet)": 0}
+            ).items():
+                console.print(f"  review:   {action} x {n}")
 
         emit(payload, as_json, render)
     finally:

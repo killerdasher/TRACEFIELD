@@ -812,3 +812,260 @@ class TestReportAuthor:
         assert code == EXIT_OK  # a broken config must not break reporting
         p = json.loads(out_path.read_text(encoding="utf-8"))
         assert p["document"]["author"] == "author not set"
+
+
+# ---------------------------------------------------------------------------
+# B-03: ingest via the real entry point (case-import + source review)
+# ---------------------------------------------------------------------------
+INGEST_FIXTURE = (
+    Path(__file__).parents[1]
+    / "fixtures"
+    / "ingest"
+    / "sherlock_v0.16.2_killerdasher_2026-11-07.csv"
+)
+
+
+class TestIngest:
+    """`case-import` + `source promote/dismiss/defer` against the real CLI
+    (contract: TRACEFIELD_02_PRODUCT_DIRECTION.md B-03 exit codes + JSON
+    parity; observation spine R-SEC-4/5/6/8)."""
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        """Collapse rich-console line wrapping for message matching."""
+        return " ".join(text.split())
+
+    # -- helpers ----------------------------------------------------------
+    @staticmethod
+    def _mkcase(monkeypatch, capsys, name: str) -> None:
+        from tracefield.cli.main import run as _  # noqa: F401 — import completes bindings
+
+        code, _out, err = run_cli_out(monkeypatch, capsys, ["case", "create", name])
+        assert code == EXIT_OK, err
+
+    @staticmethod
+    def _import(monkeypatch, capsys, case: str, file: Path | None = None) -> tuple[int, str, dict]:
+        code, out, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["case-import", "--file", str(file or INGEST_FIXTURE), "--case", case, "--json"],
+        )
+        if code == EXIT_OK:
+            return code, out, json.loads(out)
+        return code, out + err, {}
+
+    def _observation_ids(self, monkeypatch, capsys, case: str) -> list[str]:
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["observation", "list", "--case", case, "--json"]
+        )
+        assert code == EXIT_OK, err
+        obs = json.loads(out)
+        assert isinstance(obs, list)
+        return [o["id"] for o in obs]
+
+    # -- happy path -------------------------------------------------------
+    def test_import_real_fixture_online(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        self._mkcase(monkeypatch, capsys, "ing")
+        code, out, payload = self._import(monkeypatch, capsys, "ing")
+        assert code == EXIT_OK, out
+        assert payload["format_name"] == "sherlock_csv"
+        assert payload["row_count"] == 10
+        assert payload["evidence_sha256"].startswith("2930960456466566")
+        assert payload["declared_version"] == ""
+        assert len(payload["observation_ids"]) == 10
+
+        # --json parity: status reports the import event + counts
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["case-import", "status", "--case", "ing", "--json"]
+        )
+        assert code == EXIT_OK, err
+        st = json.loads(out)
+        assert st["last_import"]["action"] == "ingest.file"
+        assert st["observations_by_tool"] == {"sherlock": 10}
+        assert st["evidence_count"] == 1
+        assert st["review_actions"] == {}
+
+    def test_refusals_exit_3(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        self._mkcase(monkeypatch, capsys, "ref")
+
+        # zero rows (header-only)
+        empty = tmp_path / "empty.csv"
+        empty.write_text(
+            "username,name,url_main,url_user,exists,http_status,response_time_s\r\n",
+            newline="",
+        )
+        code, out, _ = self._import(monkeypatch, capsys, "ref", file=empty)
+        assert code == EXIT_USAGE, out
+        assert "zero data rows" in self._flat(out)
+
+        # unmappable format
+        bad = tmp_path / "bad.csv"
+        bad.write_text("a,b,c\n1,2,3\n", newline="")
+        code, out, _ = self._import(monkeypatch, capsys, "ref", file=bad)
+        assert code == EXIT_USAGE, out
+        assert "no ingest format matches header" in self._flat(out)
+
+        # oversize: a byte over the 10 MB cap, checked before parse
+        huge = tmp_path / "huge.csv"
+        huge.write_text(
+            "username,name,url_main,url_user,exists,http_status,response_time_s\r\n"
+            + "x" * (10 * 1024 * 1024 + 1),
+            newline="",
+        )
+        code, out, _ = self._import(monkeypatch, capsys, "ref", file=huge)
+        assert code == EXIT_USAGE, out
+        assert "ingest cap" in self._flat(out)
+
+    def test_import_never_echoes_raw_content(
+        self, tf_home, monkeypatch, capsys, tmp_path
+    ) -> None:
+        """R-SEC-5: even a secret-carrying row stays out of the terminal."""
+        self._mkcase(monkeypatch, capsys, "echo")
+        secret = "SECRETCLI5f2b"
+        hostile = tmp_path / "hostile.csv"
+        hostile.write_text(
+            "username,name,url_main,url_user,exists,http_status,response_time_s\r\n"
+            f"killerdasher,Probe,https://probe.test/,https://probe.test/u/k?token={secret},Claimed,200,0.5\r\n"
+            "killerdasher,GitHub,https://www.github.com/,https://www.github.com/killerdasher,Claimed,200,0.6\r\n",
+            newline="",
+        )
+        code, out, _ = self._import(monkeypatch, capsys, "echo", file=hostile)
+        assert code == EXIT_OK
+        assert secret not in out  # import output carries counts/ids, never row content
+
+        code, st_out, err = run_cli_out(
+            monkeypatch, capsys, ["case-import", "status", "--case", "echo", "--json"]
+        )
+        assert code == EXIT_OK, err
+        assert secret not in st_out + err
+
+    # -- review actions (R-SEC-8) ------------------------------------------
+    def test_dismiss_requires_reason_and_blocks_promotion(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        self._mkcase(monkeypatch, capsys, "rev")
+        code, out, err = self._import(monkeypatch, capsys, "rev")
+        assert code == EXIT_OK, out
+        obs = self._observation_ids(monkeypatch, capsys, "rev")
+        victim = obs[1]
+
+        # (c) dismiss without reason -> exit 3
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["source", "dismiss", victim, "--case", "rev"]
+        )
+        assert code == EXIT_USAGE, out + err
+        assert "requires a --reason" in self._flat(out + err)
+
+        # dismiss WITH reason -> ok, event recorded
+        code, out, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["source", "dismiss", victim, "--case", "rev", "--reason", "out of scope"],
+        )
+        assert code == EXIT_OK, out + err
+
+        # (a) promoting a dismissed-by-reason record is refused
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["source", "promote", victim, "--case", "rev"]
+        )
+        assert code == EXIT_USAGE, out + err
+        assert "dismissed by reason" in self._flat(out + err)
+
+    def test_promote_lands_source_with_provenance_and_event(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        self._mkcase(monkeypatch, capsys, "pro")
+        code, out, _ = self._import(monkeypatch, capsys, "pro")
+        assert code == EXIT_OK
+        obs = self._observation_ids(monkeypatch, capsys, "pro")
+
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["source", "promote", obs[0], "--case", "pro", "--json"]
+        )
+        assert code == EXIT_OK, out + err
+        payload = json.loads(out)
+        assert payload["event"]["action"] == "candidate.promote"
+        prov = payload["provenance"]
+        assert prov["tool"] == "sherlock"
+        assert prov["tool_version"] == "unknown"
+        assert prov["file_sha256"].startswith("2930960456466566")
+        assert prov["row_no"] >= 2  # header is record 1
+        src = payload["source"]
+        assert src["locator"].startswith("http")  # from the verified copy
+        assert "never verified by TRACEFIELD" in src["limitations"]
+
+        # double promotion is refused
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["source", "promote", obs[0], "--case", "pro"]
+        )
+        assert code == EXIT_USAGE
+        assert "already promoted" in self._flat(out + err)
+
+    def test_review_actions_do_not_change_analysis_baseline(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        """(d) promotion/dismissal alone never alter analysis output;
+        the baseline changes exactly through the existing relation flow."""
+        self._mkcase(monkeypatch, capsys, "base")
+        code, out, _ = self._import(monkeypatch, capsys, "base")
+        assert code == EXIT_OK
+        code, out, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "claim",
+                "add",
+                "--text",
+                "killerdasher controls the GitHub account github.com/killerdasher",
+                "--case",
+                "base",
+            ],
+        )
+        assert code == EXIT_OK, out + err
+        claim_id = out.splitlines()[0].split()[-1].rstrip("]")  # "added claim clm_x"
+
+        code_a, a_before, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["analyze", "claim", claim_id, "--case", "base", "--json"],
+        )
+        assert code_a == EXIT_OK
+        a_json_before = json.loads(a_before)
+
+        obs = self._observation_ids(monkeypatch, capsys, "base")
+        code, _, err = run_cli_out(
+            monkeypatch, capsys, ["source", "promote", obs[0], "--case", "base"]
+        )
+        assert code == EXIT_OK, err
+        code, _, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["source", "dismiss", obs[1], "--case", "base", "--reason", "noise"],
+        )
+        assert code == EXIT_OK, err
+
+        code_a, a_after, _ = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["analyze", "claim", claim_id, "--case", "base", "--json"],
+        )
+        assert code_a == EXIT_OK
+        assert json.loads(a_after) == a_json_before  # baseline equality holds
+
+    def test_cross_case_promotion_refused(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        self._mkcase(monkeypatch, capsys, "ca")
+        self._mkcase(monkeypatch, capsys, "cb")
+        code, out, _ = self._import(monkeypatch, capsys, "cb")
+        assert code == EXIT_OK
+        obs_b = self._observation_ids(monkeypatch, capsys, "cb")
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["source", "promote", obs_b[0], "--case", "ca"]
+        )
+        assert code == EXIT_USAGE, out + err
+        assert "cross-case promotion is not permitted" in self._flat(out + err)
