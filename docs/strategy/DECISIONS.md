@@ -372,3 +372,55 @@ block could claim authorship. Resolved 2026-10-29:
   OOVS-09 to `PASS (scoped)` with explicit limits — recipient *notification*
   of a correction stays a human workflow the tool supports but does not
   automate, and official acceptance tests remain unrun.
+
+## D24 — Unwired `catalog`/`providers` SQLite tables: DROP at schema v3 (H0-2)
+
+Alternatives: wire them as a mirror of the JSONL catalogue; keep them
+indefinitely. Chosen 2026-11-07: **drop**. Evidence: the tables exist at
+`src/tracefield/storage/database.py` (`catalog`/`providers`, created since
+the first schema) with zero reads/writes anywhere in `repositories.py`;
+the D7 "wire or drop before schema v2" deadline passed; the JSONL catalogue
+remains the single source of truth (`docs/strategy/DECISIONS.md` D22's
+operator-manual verification stays authoritative). Wiring a second
+representation of the same data would double the drift surface for zero
+analyst value — the honesty rules forbid carrying a table whose contents
+nobody maintains. **Implementation contract:** the DROP happens in the
+schema-v3 migration window with a migration test asserting (a) tables
+absent after migrate, (b) the tripwire assert (`SCHEMA_VERSION`) updated in
+the same change, (c) downgrade not supported (documented, one-way). No
+drop occurs during v2.x releases.
+
+## D25 — Worker offload (A2/R-A2-3): measured — the DB query is NOT the bottleneck (H0-3)
+
+Measured 2026-11-07, on this machine, one synthetic case with 10,000
+evidence rows (fresh data root):
+
+| Probe | Result |
+|---|---|
+| `EvidenceRepo.add` ×10,000 | 0.358 s total |
+| `list_for_case()` (query + typed construction, 10k) | **94.2 ms** (second run: 82.5 ms) |
+| `json.dumps` of all 10k typed records | 42.9 ms (4.14 MB) |
+| Plain-text render, 10k lines | 2.3 ms |
+| Full CLI `evidence list --case …` table render | **≈5.2 s wall** (JSON variant ≈6.3 s) |
+
+Conclusion: the A2/R-A2-3 hypothesis ("render-path synchronous queries may
+hitch the TUI") is **refuted at the DB layer** — a 10k-row query costs
+<100 ms. The dominating cost is *rich-table rendering* (~5 s at 10k rows),
+which is where Textual worker offload (B-09) must act, together with ingest
+batch processing. Decision: keep repository calls on the calling thread;
+B-09 is re-scoped to "workers for rendering + import batches", and the
+R-A2-3 residual is re-rated **Measured (query benign; render offload
+pending)** rather than Open-without-evidence. Re-measure if a real case
+exceeds 50k rows.
+
+## D26 — The one-off e2e reproducibility flake: instrumented, never silenced (B-05)
+
+The failure observed 2026-11-06 (assessment-reproducibility assert,
+`tests/e2e/test_demo_case.py:378` region) is handled by policy, not by a
+guess: 10 additional full runs of that e2e file on 2026-11-07 were all
+clean (cumulative 18 clean runs after the single observed failure; root
+cause unproven). Rules adopted: the pin test is never removed or weakened
+to make it pass; if it recurs ≥2 times within any 50-run window, a timing
+instrument is added and the diagnosis re-opened; B-05 stays listed in RISK
+_REGISTER until two consecutive release batteries (plus these 18 runs)
+show no recurrence. Anti-goal: chasing a 1-in-19 phantom to extinction.

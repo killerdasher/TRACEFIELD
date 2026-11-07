@@ -89,3 +89,13 @@
 | Newer-schema DB silently accepted by `migrate()` | Medium | **Open** | Audit F3; fix = refuse with exit code + message when `db_version > SCHEMA_VERSION` |
 | TUI renders "synthetic/demo data" label over live rows | Medium | **Open** | Audit T7; honesty-boundary violation; fix per TS-4 |
 | SQLite corrupt/busy/full, export interruption, cancel paths untested | Medium | **Open** | Audit §6; seed P1 tests in `FINAL_BUILD_SPEC.md` |
+
+## Phase 14 refresh (2026-11-07) — H0 stabilization notes
+
+| Item | Status | Dated evidence |
+|---|---|---|
+| One-off e2e reproducibility flake (B-05) | **Instrumented — watch, not fixed-by-guess** | 2026-11-06: 1 failure + 8 clean; 2026-11-07: +10 clean (18 consecutive). Decision D26: policy; re-open on ≥2 hits per 50 runs |
+| A2/R-A2-3 render-path sync queries | **Measured — DB hypothesis refuted** | 2026-11-07 (10k evidence rows): query 94.2 ms / JSON 42.9 ms / CLI table render ≈5.2 s (decision D25). Worker offload (B-09) re-targeted at rendering + ingest batches; DB path stays synchronous |
+| Unwired `catalog`/`providers` tables (D7 tardiness) | **Decision recorded — drop at schema v3** | D24 (2026-11-07): DROP in migration window + test; no v2.x change |
+| Review-brief experiment (H0-5) | **Shipped** | `docs/strategy/REVIEW_BRIEF.md` (2026-11-07), shareable; send log + responses to be recorded here when they arrive |
+| Sherlock format verification (B-01) | **In progress — real fixture captured** | Sherlock v0.16.2, real operator-owned run 2026-11-07 (clean boolean `--csv`); fixture + schema doc land with the ingest commit |
