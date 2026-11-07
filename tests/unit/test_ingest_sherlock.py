@@ -309,7 +309,28 @@ class TestPins:
         assert all("extra_columns=site_note" in o.summary for o in obs)
         assert "site_note" not in SHERLOCK_CSV_HEADER  # known header untouched
 
+    def test_promotion_recovers_exactly_the_pointed_row(
+        self, settings, db, case_factory
+    ) -> None:
+        """raw_ref counts file RECORDS (header = record 1). Promoting the
+        GitHub observation must recover the GitHub URL, not a row off by
+        one."""
+        from tracefield.ingest import promote_observation
+
+        case = case_factory("promote-row")
+        run_import(settings, db, case, FIXTURE)
+        obs = ObservationRepo(db).list_for_case(case.id)
+        github = next(o for o in obs if "GitHub" in o.summary)
+        expected_row = next(r for r in parse_sherlock_csv(FIXTURE).rows if r.name == "GitHub")
+        assert int(github.raw_ref.rsplit("=", 1)[1]) == expected_row.row_no
+
+        src, _event, prov = promote_observation(settings, db, case, github.id)
+        assert src.locator == expected_row.url_user == "https://www.github.com/killerdasher"
+        assert prov.row_no == expected_row.row_no
+        assert prov.file_sha256 == FIXTURE_SHA256
+
     def test_ids_are_never_reused_across_imports(self, settings, db, case_factory) -> None:
+
         case = case_factory("ids")
         r1 = run_import(settings, db, case, FIXTURE)
         r2 = run_import(settings, db, case, FIXTURE)

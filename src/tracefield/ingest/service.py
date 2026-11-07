@@ -384,7 +384,11 @@ def _read_row_from_evidence(
     path = ws.case_dir(case_id) / ev.storage_ref
     with path.open(encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
-        for current, raw in enumerate(reader, start=1):
+        # raw_ref counts FILE RECORDS (header = record 1); DictReader yields
+        # data rows only, so the first data row is record 2.
+        current = 1
+        for raw in reader:
+            current += 1
             if current == row_no:
                 return SherlockRow(
                     row_no=row_no,
@@ -399,7 +403,6 @@ def _read_row_from_evidence(
         raise RowShapeRefusal(
             f"row {row_no} absent from stored copy (file has {current} records)"
         )
-
 
 def _append_event(
     db: Database, case_id: str, action: str, inputs: list[str], outputs: list[str]
