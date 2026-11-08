@@ -1217,3 +1217,296 @@ def test_workspace_switch_and_filter_baseline(tf_home, settings, db) -> None:
     assert switch_s < 5.0, f"workspace switch regressed: {switch_s:.3f}s"
     assert filter_s < 2.0, f"list filter regressed: {filter_s:.3f}s"
     assert filtered > 0
+
+
+
+
+# ---------------------------------------------------------------------------
+# B-06 / J6: import → mission last-import block → triage overlay
+# ---------------------------------------------------------------------------
+INGEST_FIXTURE = (
+    Path(__file__).parents[1]
+    / "fixtures"
+    / "ingest"
+    / "sherlock_v0.16.2_killerdasher_2026-11-07.csv"
+)
+INGEST_SHA256 = (
+    "29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add"
+)
+
+
+class TestJ6IngestTriaging:
+    def test_import_triage_promote_dismiss_reason_report(
+        self, tf_home, settings, db, monkeypatch, capsys
+    ) -> None:
+        # Journey step 1: the import happens via the REAL CLI (offline).
+        code, out, err = run_cli_out(monkeypatch, capsys, ["case", "create", "j6-case"])
+        assert code == 0, err
+        code, out, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["case-import", "--file", str(INGEST_FIXTURE), "--case", "j6-case", "--json"],
+        )
+        assert code == 0, out + err
+        payload = json.loads(out)
+        assert payload["row_count"] == 10
+
+        from textual.widgets import (
+            Input,
+            OptionList,
+        )
+
+        from tracefield.tui.app import TriageScreen
+
+        async def scenario() -> str:
+            app = make_app()
+            async with app.run_test(size=(130, 44)) as pilot:
+                await pilot.pause(0.5)
+                case_id = app.active_case_id
+                assert case_id is not None, "exactly one case must auto-select (TS-1)"
+
+                # Step 2: mission shows the last-import block (honest numbers).
+                mission = str(app.view_by_index(0).query_one("#mission-body").render())
+                assert "last import" in mission
+                assert "ingest.file" in mission
+                assert INGEST_SHA256[:16] in mission
+                assert "rows recorded: 10" in mission
+
+                # Step 3: evidence workspace lists the raw file with its hash
+                # (1 source row + 1 evidence row pre-triage; DataTable —
+                # text is rendered through rich Panel, so count rows).
+                await pilot.press("2")
+                await pilot.pause(0.6)
+                ev_table = app.view_by_index(1).query_one("#ws-evidence-table")
+                assert ev_table.row_count == 2, f"pre-triage rows: {ev_table.row_count}"
+
+                # Step 4: triage overlay — promote 2, dismiss 1 with reason,
+                # refuse one blank dismiss, defer 1.
+                await pilot.press("1")
+                await pilot.pause(0.3)
+                await pilot.press("t")
+                await pilot.pause(0.5)
+                screen = app.screen
+                assert isinstance(screen, TriageScreen)
+                assert len(screen._obs) == 10
+
+                def idx_of(fragment: str) -> int:
+                    return next(
+                        i
+                        for i, o in enumerate(screen._obs)
+                        if fragment in o.summary
+                    )
+
+                opts = screen.query_one("#triage-options", OptionList)
+                for fragment in ("GitHub", "Discord"):
+                    opts.highlighted = idx_of(fragment)
+                    await pilot.pause(0.1)
+                    await pilot.press("p")
+                    await pilot.pause(0.3)
+
+                opts.highlighted = idx_of("AniWorld")
+                await pilot.pause(0.1)
+                await pilot.press("d")
+                await pilot.pause(0.4)
+                reason_input = app.screen.query_one(Input)
+                reason_input.value = "poster page; suspected false positive"
+                await pilot.press("enter")
+                await pilot.pause(0.4)
+
+                opts.highlighted = idx_of("BabyRu")
+                await pilot.pause(0.1)
+                await pilot.press("d")
+                await pilot.pause(0.4)
+                blank = app.screen.query_one(Input)
+                blank.value = ""
+                await pilot.press("enter")
+                await pilot.pause(0.4)
+
+                opts.highlighted = idx_of("F3.cool")
+                await pilot.pause(0.1)
+                await pilot.press("f")
+                await pilot.pause(0.3)
+                await pilot.press("escape")
+                await pilot.pause(0.4)
+
+                # Step 5: evidence workspace lists the 2 promoted sources
+                # (2 source rows → 1 evidence + 3 sources total).
+                await pilot.press("2")
+                await pilot.pause(0.8)
+                table = app.view_by_index(1).query_one("#ws-evidence-table")
+                assert table.row_count == 4, (
+                    f"expected 1 evidence + 3 sources, saw {table.row_count}"
+                )
+
+                # Mission reflects the review actions (never inflated) —
+                # re-render explicitly: the overlay sat on top of the
+                # background view, which refreshes on switch (switching to
+                # the same workspace is a no-op by design).
+                app.view_by_index(0).refresh_sync()
+                await pilot.pause(0.3)
+                mission_after = str(
+                    app.view_by_index(0).query_one("#mission-body").render()
+                )
+                assert "promote x2" in mission_after, mission_after
+                assert "dismiss x1" in mission_after
+                assert "defer x1" in mission_after
+                return str(settings.db_path)
+
+        db_path = asyncio.run(scenario())
+
+        # Store-level honesty: exactly 2 promoted sources with provenance;
+        # exactly one dismissal (the blank one was refused, not recorded).
+        from tracefield.storage import Database
+
+        check = Database(db_path)
+        from tracefield.storage.repositories import (
+            CaseRepo,
+            EventRepo,
+            SourceRepo,
+        )
+
+        case = CaseRepo(check).resolve("j6-case")
+        assert case is not None
+        promoted = [
+            s
+            for s in SourceRepo(check).list_for_case(case.id)
+            if s.limitations.startswith("candidate from")
+        ]
+        assert len(promoted) == 2
+        assert all(
+            "never verified by TRACEFIELD" in s.limitations for s in promoted
+        )
+        assert all(s.access_method == "manual" for s in promoted)
+        actions = [e.action for e in EventRepo(check).list_for_case(case.id)]
+        assert (
+            actions.count("candidate.dismiss") == 1
+        ), "a blane blank-reason dismiss must be refused, not recorded"
+        assert actions.count("candidate.promote") == 2
+        assert actions.count("candidate.defer") == 1
+        check.close()
+
+        # Step 6: the report carries the provenance strings verbatim.
+        code, md, err = run_cli_out(monkeypatch, capsys, ["report", "j6-case"])
+        assert code == 0, err
+        assert "Limitations:" in md
+        assert "never verified by TRACEFIELD" in md
+        assert "ingest_sha256_marker" not in md  # no invented content
+
+
+# ---------------------------------------------------------------------------
+# B-06 / J7: TUI-side import of a large fixture, cancelled mid-run
+# ---------------------------------------------------------------------------
+class TestJ7CancelIngest:
+    def test_cancel_mid_import_retains_labelled_complete_batches(
+        self, tf_home, settings, db, tmp_path
+    ) -> None:
+        from tracefield.core.domain import Case
+        from tracefield.storage.repositories import CaseRepo
+
+        total_rows = 3000
+        header = "username,name,url_main,url_user,exists,http_status,response_time_s"
+        row_template = (
+            "killerdasher,Synthetic{i},https://syn.test/,"
+            "https://syn.test/u/killerdasher{i},Claimed,200,0.100000{i}"
+        )
+        large = tmp_path / "large_capture.csv"
+        lines = [header]
+        lines += [row_template.format(i=k) for k in range(1, total_rows + 1)]
+        large.write_text("\r\n".join(lines) + "\r\n", newline="")
+
+        case = CaseRepo(db).create(Case(title="j7-case", purpose="cancel"))
+        cid = case.id
+        db.close()
+
+        async def scenario() -> tuple[int, list[dict], str, int]:
+            app = make_app()
+            app.chunk_delay = 0.02  # observable cancellation checkpoints
+            async with app.run_test(size=(130, 44)) as pilot:
+                await pilot.pause(0.5)
+                assert app.active_case_id == cid, "single case auto-selects"
+
+                # i → path prompt → real Input.Submitted submit.
+                # The Enter that starts the op is delivered through the
+                # input's own submit action — the exact handler a physical
+                # Enter triggers (pilot.press would drain CPU-idle, which
+                # at import speed can complete the ENTIRE import first).
+                await pilot.press("i")
+                await pilot.pause(0.5)
+                from textual.widgets import Input
+
+                path_input = app.screen.query_one(Input)
+                path_input.value = str(large)
+                await path_input.action_submit()
+                reached = False
+                for _ in range(400):
+                    if app.op.state == "running" and (app.op.count or 0) >= 100:
+                        reached = True
+                        break
+                    await asyncio.sleep(0.02)
+                assert reached, (
+                    f"import never reached a committed batch: "
+                    f"state={app.op.state} count={app.op.count}"
+                )
+
+                send_key(app, "ctrl+c", None)
+                terminal = {"cancelled", "done", "failed"}
+                for _ in range(400):
+                    if app.op_log and app.op_log[-1]["state"] in terminal:
+                        break
+                    await asyncio.sleep(0.01)
+                await pilot.pause(0.5)
+                status = app._status_text()
+                cancelled_log = [
+                    e for e in app.op_log if e["state"] == "cancelled"
+                ]
+                return str(large), cancelled_log, status, cid
+
+        _path, cancelled_log, status, _cid = asyncio.run(scenario())
+
+        # Runs records the cancel (op log) and the status says so honestly.
+        assert cancelled_log, f"cancel must be recorded in the op log: {_path}"
+        mid_count = cancelled_log[-1]["count"]
+        assert 0 < mid_count < total_rows
+        assert cancelled_log[-1]["label"] == "ingest: import rows"
+        assert "cancelled" in status
+
+        # Everything before the cancel is retained, in complete committed
+        # batches, and nothing beyond the last completed unit exists.
+        from tracefield.storage import Database
+
+        check = Database(str(settings.db_path))
+        obs = check.execute(
+            "SELECT COUNT(*) AS n FROM observations WHERE case_id=?", (cid,)
+        ).fetchone()["n"]
+        assert obs == mid_count, "retained rows must equal the reported count"
+        assert obs % 100 == 0, "cancellation happens between committed batches"
+        event = check.execute(
+            "SELECT * FROM analysis_events WHERE case_id=? ORDER BY rowid DESC LIMIT 1",
+            (cid,),
+        ).fetchone()
+        assert event["action"] == "ingest.file"
+        assert any(
+            i.startswith("incomplete=cancelled") and f"rows_written={obs}" in i
+            for i in json.loads(event["inputs"])
+        ), f"partial import must be labelled as such: {json.loads(event['inputs'])}"
+        # the chain still closes after a cancelled import
+        from tracefield.core.provenance import compute_event_digest
+
+        prev = ""
+        chain_ok = True
+        for r in check.execute(
+            "SELECT * FROM analysis_events WHERE case_id=? ORDER BY occurred_at, rowid",
+            (cid,),
+        ).fetchall():
+            recomputed = compute_event_digest(
+                r["action"],
+                json.loads(r["inputs"]),
+                json.loads(r["outputs"]),
+                r["prev_digest"],
+                r["occurred_at"],
+            )
+            if recomputed != r["digest"] or r["prev_digest"] != prev:
+                chain_ok = False
+            prev = recomputed
+        assert chain_ok
+        check.close()

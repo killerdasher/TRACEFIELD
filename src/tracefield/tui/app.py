@@ -22,6 +22,8 @@ the live BINDINGS so this table can never drift):
   claims   n          new claim in the active case
   claims   r          relate selected evidence to the selected claim
   runs     v          verify the event hash chain
+  mission  t          triage overlay: promote (p), dismiss with reason (d), defer (f)
+  mission  i          import a tool output file (offline; Ctrl+C cancels mid-run)
 
 Honesty rules enforced by tests: the subtitle says "live workspace data"
 unless TRACEFIELD_DEMO_FIXTURES=1 (then the demo marker is shown);
@@ -44,7 +46,7 @@ from textual.widgets.option_list import Option
 
 from tracefield.config import load_settings
 from tracefield.config.logging import get_logger
-from tracefield.core.domain import Case
+from tracefield.core.domain import Case, Observation
 from tracefield.security import sanitize_for_terminal
 from tracefield.storage import CaseWorkspace, Database
 from tracefield.storage.repositories import (
@@ -52,6 +54,7 @@ from tracefield.storage.repositories import (
     ClaimRepo,
     EventRepo,
     EvidenceRepo,
+    ObservationRepo,
     RelationRepo,
     SourceRepo,
 )
@@ -191,6 +194,168 @@ class CasePickerScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class TriageScreen(ModalScreen[None]):
+    """Ingest triage overlay (IS-3 / J6): per-row review of imported
+    observations. promote → case Source (explicit, never auto); dismiss
+    requires a recorded reason; defer defers. Rows arrive unreviewed and
+    are never evidence until reviewed."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("p", "promote", "Promote"),
+        Binding("d", "dismiss_import", "Dismiss"),
+        Binding("f", "defer", "Defer"),
+        Binding("escape", "cancel", "Close"),
+    ]
+
+    def __init__(self, tui: TracefieldApp, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.tui = tui
+        self._obs: list[Observation] = []
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(
+                "Ingest triage — observations of the active case",
+                classes="overlay-title",
+            ),
+            OptionList(id="triage-options"),
+            Static(
+                "p promote · d dismiss (asks for a reason) · f defer · "
+                "Esc closes",
+                classes="overlay-note",
+            ),
+            id="triage-box",
+        )
+
+    def on_mount(self) -> None:
+        self._reload()
+
+    def _reload(self) -> None:
+        from tracefield.ingest import review_history
+
+        tui = self.tui
+        options_list = self.query_one("#triage-options", OptionList)
+        options_list.clear_options()
+        cid = tui.active_case_id
+        if cid is None or tui.db is None:
+            return
+        repo = ObservationRepo(tui.db)
+        obs_rows = sorted(
+            repo.list_for_case(cid),
+            key=lambda o: int(o.raw_ref.rsplit("=", 1)[1])
+            if "=row=" in o.raw_ref
+            else 10**9,
+        )
+        self._obs = []
+        for obs in obs_rows:
+            history = review_history(tui.db, cid, obs.id)
+            state = "unreviewed"
+            extra = ""
+            for ev in history:
+                if ev.action == "candidate.promote":
+                    state = "promoted"
+                elif ev.action == "candidate.dismiss":
+                    state = "dismissed"
+                    extra = (
+                        f": {ev.inputs[1]}" if len(ev.inputs) > 1 else ""
+                    )
+                elif ev.action == "candidate.defer":
+                    state = "deferred"
+            self._obs.append(obs)
+            row_no = obs.raw_ref.rsplit("=", 1)[-1]
+            options_list.add_option(
+                Option(
+                    sanitize_for_terminal(
+                        f"[{state}{extra}] row {row_no}  {obs.summary}"
+                    ),
+                    id=obs.id,
+                )
+            )
+        if options_list.option_count:
+            options_list.highlighted = 0
+
+    def _selected(self) -> Observation | None:
+        options_list = self.query_one("#triage-options", OptionList)
+        highlighted = options_list.highlighted
+        if highlighted is None or not self._obs:
+            return None
+        # option indices mirror self._obs indices (options built in order)
+        if 0 <= highlighted < len(self._obs):
+            return self._obs[highlighted]
+        return None
+
+    def action_promote(self) -> None:
+        from tracefield.ingest import IngestRefusal, promote_observation
+
+        tui = self.tui
+        db = tui.db
+        obs = self._selected()
+        if obs is None or tui.active_case_id is None or db is None:
+            tui.hint("no observation selected (or no case/db ready)")
+            return
+        try:
+            src, _event, prov = promote_observation(
+                tui.settings, db, tui.case_by_id(tui.active_case_id), obs.id
+            )
+        except IngestRefusal as exc:
+            tui.hint(f"promote refused: {exc.reason} — {exc}")
+            return
+        tui.hint(
+            f"promoted → {src.id} ({prov.tool} row {prov.row_no}); "
+            "no fetch was performed"
+        )
+        self._reload()
+
+    def action_dismiss_import(self) -> None:
+        tui = self.tui
+        db = tui.db
+        obs = self._selected()
+        if obs is None or tui.active_case_id is None or db is None:
+            tui.hint("no observation selected (or no case/db ready)")
+            return
+        case_id = tui.active_case_id
+
+        def submit(reason: str | None) -> None:
+            from tracefield.ingest import IngestRefusal, dismiss_observation
+
+            if not reason or not reason.strip():
+                tui.hint(
+                    "dismiss refused: a dismissal without a recorded reason "
+                    "is an unrecorded judgment"
+                )
+                self._reload()
+                return
+            try:
+                dismiss_observation(db, tui.case_by_id(case_id), obs.id, reason)
+            except IngestRefusal as exc:
+                tui.hint(f"dismiss refused: {exc.reason} — {exc}")
+                return
+            tui.hint("dismissed (reason recorded as an event)")
+            self._reload()
+
+        tui.prompt_text("dismiss reason:", submit)
+
+    def action_defer(self) -> None:
+        from tracefield.ingest import IngestRefusal, defer_observation
+
+        tui = self.tui
+        db = tui.db
+        obs = self._selected()
+        if obs is None or tui.active_case_id is None or db is None:
+            tui.hint("no observation selected (or no case/db ready)")
+            return
+        try:
+            defer_observation(db, tui.case_by_id(tui.active_case_id), obs.id)
+        except IngestRefusal as exc:
+            tui.hint(f"defer refused: {exc.reason} — {exc}")
+            return
+        tui.hint("deferred (event recorded)")
+        self._reload()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TextPromptScreen(ModalScreen[str | None]):
     """Single-line text prompt (new claim, hash path …)."""
 
@@ -305,7 +470,8 @@ class TracefieldApp(App[None]):
     #runs-verify { color: $fg; padding: 0 1; }
     .overlay-title { text-style: bold; color: $accent; }
     .overlay-note { color: $muted; }
-    #help-box, #jump-box, #case-box, #prompt-box, #choice-box, #quit-box {
+    #help-box, #jump-box, #case-box, #prompt-box, #choice-box, #quit-box,
+    #triage-box {
         width: 60%; height: auto; border: round $accent; padding: 1 2;
         background: $surface; margin: 2 4;
     }
@@ -582,7 +748,10 @@ class TracefieldApp(App[None]):
             try:
                 view.query_one(Input).focus()
             except Exception:
-                self.set_focus(None)
+                if view.can_focus:
+                    view.focus()
+                else:
+                    self.set_focus(None)
         if hasattr(view, "reload_rows"):
             self.run_view_refresh(view)
         elif hasattr(view, "refresh_sync"):

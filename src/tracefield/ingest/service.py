@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -73,6 +74,9 @@ class ImportResult(BaseModel):
     declared_version: str  # "" → recorded as "unknown" on observations
     event_id: str
     row_count: int
+    #: True when an operator cancelled mid-import (TUI op, J7); rows already
+    #: committed before the cancel are retained and the event is labelled
+    cancelled: bool = False
 
 
 class ProvenanceString(BaseModel):
@@ -86,7 +90,26 @@ class ProvenanceString(BaseModel):
     http_status: str
 
 
-def run_import(
+class PreparedImport(BaseModel):
+    """Everything the batch-writer needs; produced by ``prepare_import``."""
+
+    case_id: str
+    source_id: str
+    evidence_id: str
+    evidence_sha256: str
+    storage_ref: str
+    format_name: str
+    tool: str
+    tool_version: str
+    #: what the file itself declares ("" when absent — recorded "unknown")
+    declared_version: str
+    extra_columns: list[str]
+    rows: list[SherlockRow]
+    #: 1-based record number the raw_ref counter starts from
+    first_record_no: int = 2
+
+
+def prepare_import(
     settings: Settings,
     db: Database,
     case: Case,
@@ -94,11 +117,13 @@ def run_import(
     *,
     source_id: str = "",
     privacy_label: str = "unknown",
-) -> ImportResult:
-    """Import one operator-supplied tool-output file into ``case``.
+) -> PreparedImport:
+    """All fail-closed pre-conditions + the raw-first evidence copy.
 
-    Fail-closed: every refusal below happens before ANY database write, so a
-    refused file leaves zero partial rows.
+    Raises every :class:`IngestRefusal` BEFORE any database write. The
+    batched ``(prepare → write_rows_batch → finish_import_event)`` form lets
+    a UI drive real cancellation checkpoints (J7) through the SAME code
+    path the CLI uses.
     """
     path = Path(path)
     # R-SEC-2 — size cap BEFORE parse.
@@ -149,19 +174,46 @@ def run_import(
         excerpt="",  # R-SEC-5: raw content is never copied into excerpts
         privacy_label=privacy_label,
     )
+    return PreparedImport(
+        case_id=case.id,
+        source_id=src.id,
+        evidence_id=ev.id,
+        evidence_sha256=ev.sha256,
+        storage_ref=ev.storage_ref,
+        format_name=identity.format_name,
+        tool=spec.producer,
+        tool_version=identity.declared_version or "unknown",
+        declared_version=identity.declared_version,
+        extra_columns=list(parsed.extra_columns),
+        rows=parsed.rows,
+    )
 
+
+def write_rows_batch(
+    db: Database,
+    prepared: PreparedImport,
+    rows: list[SherlockRow],
+) -> list[str]:
+    """Insert one committed batch of rows as observations; return their ids.
+
+    Each batch is a commitment point: rows written here are retained even if
+    a subsequent batch is cancelled, and the case event records the cancel.
+    """
     observations = ObservationRepo(db)
-    tool_version = identity.declared_version or "unknown"
-    flag = f" extra_columns={','.join(parsed.extra_columns)}" if parsed.extra_columns else ""
+    flag = (
+        f" extra_columns={','.join(prepared.extra_columns)}"
+        if prepared.extra_columns
+        else ""
+    )
     obs_ids: list[str] = []
-    for row in parsed.rows:
+    for row in rows:
         obs = observations.add(
             Observation(
-                case_id=case.id,
-                evidence_id=ev.id,
-                tool_name=spec.producer,
-                tool_version=tool_version,
-                raw_ref=f"{ev.storage_ref}#row={row.row_no}",
+                case_id=prepared.case_id,
+                evidence_id=prepared.evidence_id,
+                tool_name=prepared.tool,
+                tool_version=prepared.tool_version,
+                raw_ref=f"{prepared.storage_ref}#row={row.row_no}",
                 summary=(
                     f"{row.name}: exists={row.exists} http_status={row.http_status}"
                     f"{flag}"
@@ -169,28 +221,84 @@ def run_import(
             )
         )
         obs_ids.append(obs.id)
+    return obs_ids
 
-    event = _append_event(
+
+def finish_import_event(
+    db: Database,
+    prepared: PreparedImport,
+    path: str | Path,
+    obs_ids: list[str],
+    *,
+    incomplete: str = "",
+) -> AnalysisEvent:
+    """Close the import with its chain event.
+
+    ``incomplete`` is empty for a complete import; otherwise a short honest
+    reason token (``"cancelled"`` / ``"error"``) that lands in the event
+    inputs next to the rows actually written — a partial import is never
+    claimed as complete.
+    """
+    inputs = [str(Path(path).resolve()), prepared.evidence_sha256]
+    if incomplete:
+        inputs.append(f"incomplete={incomplete} rows_written={len(obs_ids)}")
+    return _append_event(
         db,
-        case.id,
+        prepared.case_id,
         "ingest.file",
-        inputs=[str(path.resolve()), ev.sha256],
-        outputs=[ev.id, *obs_ids],
+        inputs=inputs,
+        outputs=[prepared.evidence_id, *obs_ids],
     )
 
-    return ImportResult(
-        case_id=case.id,
-        format_name=identity.format_name,
-        source_id=src.id,
-        evidence_id=ev.id,
-        evidence_sha256=ev.sha256,
-        storage_ref=ev.storage_ref,
-        observation_ids=obs_ids,
-        extra_columns=list(parsed.extra_columns),
-        declared_version=identity.declared_version,
-        event_id=event.id,
-        row_count=len(parsed.rows),
+
+def run_import(
+    settings: Settings,
+    db: Database,
+    case: Case,
+    path: str | Path,
+    *,
+    source_id: str = "",
+    privacy_label: str = "unknown",
+    should_cancel: Callable[[], bool] | None = None,
+    batch_size: int = 250,
+) -> ImportResult:
+    """Import one operator-supplied tool-output file into ``case``.
+
+    Fail-closed: every refusal below happens before ANY database write, so a
+    refused file leaves zero partial rows. ``should_cancel`` (checked between
+    committed batches) enables the honest-cancelled-partial path (J7).
+    """
+    prepared = prepare_import(
+        settings, db, case, path, source_id=source_id, privacy_label=privacy_label
     )
+    batch_size = max(1, batch_size)
+    obs_ids: list[str] = []
+    cancelled = False
+    for start in range(0, len(prepared.rows), batch_size):
+        if should_cancel is not None and should_cancel():
+            cancelled = True
+            break
+        obs_ids.extend(
+            write_rows_batch(db, prepared, prepared.rows[start : start + batch_size])
+        )
+
+    event = finish_import_event(
+        db, prepared, path, obs_ids, incomplete="cancelled" if cancelled else ""
+    )
+    return ImportResult(        case_id=prepared.case_id,
+        format_name=prepared.format_name,
+        source_id=prepared.source_id,
+        evidence_id=prepared.evidence_id,
+        evidence_sha256=prepared.evidence_sha256,
+        storage_ref=prepared.storage_ref,
+        observation_ids=obs_ids,
+        extra_columns=prepared.extra_columns,
+        declared_version=prepared.declared_version,
+        event_id=event.id,
+        row_count=len(obs_ids),
+        cancelled=cancelled,
+    )
+
 
 
 def get_observation(db: Database, obs_id: str) -> Observation | None:

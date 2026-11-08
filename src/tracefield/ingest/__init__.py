@@ -27,13 +27,17 @@ from tracefield.ingest.registry import (
 )
 from tracefield.ingest.service import (
     ImportResult,
+    PreparedImport,
     ProvenanceString,
     defer_observation,
     dismiss_observation,
+    finish_import_event,
     get_observation,
+    prepare_import,
     promote_observation,
     review_history,
     run_import,
+    write_rows_batch,
 )
 
 __all__ = [
@@ -47,6 +51,7 @@ __all__ = [
     "IngestRefusal",
     "MissingReasonRefusal",
     "OversizedFileRefusal",
+    "PreparedImport",
     "ProvenanceString",
     "RowShapeRefusal",
     "UnmappableFormatRefusal",
@@ -55,9 +60,12 @@ __all__ = [
     "defer_observation",
     "detect_format",
     "dismiss_observation",
+    "finish_import_event",
     "get_observation",
+    "prepare_import",
     "promote_observation",
     "require_supported_version",
     "review_history",
     "run_import",
+    "write_rows_batch",
 ]

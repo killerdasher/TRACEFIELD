@@ -20,12 +20,24 @@ from tracefield.core.analysis import RULE_VERSION
 from tracefield.core.provenance import hash_file
 from tracefield.security import sanitize_for_terminal
 
-from .state import OP_CANCELLED, OP_DONE, OP_FAILED
+from .state import OP_CANCELLED, OP_DONE, OP_FAILED, OP_RUNNING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tracefield.tui.app import TracefieldApp
 
 CHUNK = 200  # rows per chunk; cancel is checked between chunks
+
+
+def _review_counts(tui: TracefieldApp, case_id: str) -> dict[str, int]:
+    """Live candidate.* event counts for the mission block (never cached)."""
+    if tui.db is None:
+        return {}
+    rows = tui.db.execute(
+        "SELECT action, COUNT(*) AS n FROM analysis_events WHERE case_id=? "
+        "AND action LIKE 'candidate.%' GROUP BY action",
+        (case_id,),
+    ).fetchall()
+    return {r["action"]: r["n"] for r in rows}
 
 
 def _view(tui: TracefieldApp) -> TracefieldApp:
@@ -201,8 +213,13 @@ class MissionView(Vertical):
 
     VIEW_TITLE = "Mission"
     MULTI_PANE = False
+    # Focusable so its ingest bindings (t/i) fire even with no focusable
+    # child widget (J6/J7: keys must reach the mission surface reliably).
+    can_focus = True
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("v", "verify_evidence", "Verify evidence", show=True),
+        Binding("t", "open_triage", "Triage imports", show=True),
+        Binding("i", "import_output", "Import file", show=True),
     ]
 
     def __init__(self, tui: TracefieldApp, **kwargs: Any) -> None:
@@ -256,6 +273,41 @@ class MissionView(Vertical):
         badge = tui.integrity_badge.get(cid)
         lines.append(f"evidence integrity: {badge or 'not checked (v to verify)'}")
         lines.append("")
+        last_import = None
+        try:
+            last_import = tui.event_repo.latest_action(cid, ("ingest.file",))
+        except Exception:  # pragma: no cover — defensive: view never crash-ships
+            last_import = None
+        lines.append("last import:")
+        if last_import is None:
+            lines.append("  none recorded — CLI case-import --file, or press i to import here")
+        else:
+            cancelled_input = next(
+                (
+                    i
+                    for i in last_import.inputs
+                    if i.startswith("incomplete=")
+                ),
+                "",
+            )
+            label = f"  {last_import.occurred_at}  ingest.file"
+            if cancelled_input:
+                label += f"  ({cancelled_input})"
+            lines.append(label)
+            lines.append(f"  digest {last_import.digest[:12]}…")
+            if len(last_import.inputs) >= 2:
+                lines.append(f"  file sha256 {last_import.inputs[1][:16]}…")
+            lines.append(f"  rows recorded: {len(last_import.outputs) - 1}")
+        review_counts = _review_counts(tui, cid)
+        lines.append(
+            "triage after import: "
+            + (
+                ", ".join(f"{k.split('.')[1]} x{v}" for k, v in review_counts.items())
+                if review_counts
+                else "none yet (press t to open the triage overlay)"
+            )
+        )
+        lines.append("")
         lines.append("recent events:")
         for e in events[-5:]:
             lines.append(f"  {e.occurred_at}  {e.action}  {e.digest[:12]}…")
@@ -299,6 +351,91 @@ class MissionView(Vertical):
         else:
             tui.integrity_badge[cid] = f"intact ({ok}/{len(items)})"
         tui.finish_op(OP_DONE, count=len(items))
+        self.refresh_sync()
+
+    # -- ingest actions (B-06: triage overlay + in-TUI import, J6/J7) -------
+    def action_open_triage(self) -> None:
+        from tracefield.tui.app import TriageScreen
+
+        tui = self.tui
+        if tui.active_case_id is None:
+            tui.hint("no active case — press c to select one")
+            return
+        tui.push_screen(TriageScreen(tui))
+
+    def action_import_output(self) -> None:
+        tui = self.tui
+        if tui.active_case_id is None:
+            tui.hint("no active case — press c to select one")
+            return
+
+        def start(path: str | None) -> None:
+            if path and path.strip():
+                self._run_import_op(path.strip())
+
+        tui.prompt_text("tool output file path:", start)
+
+    def _run_import_op(self, path: str) -> None:
+        tui = self.tui
+        if tui.op.state == OP_RUNNING:  # mirrors begin_op's busy guard
+            tui.hint("busy — Ctrl+C cancels the running op first")
+            return
+        tui.begin_op("ingest: import rows")
+        tui.run_worker(self._import_worker(path))
+
+    async def _import_worker(self, path: str) -> None:
+        """TS-3 state machine around the SAME ingest code path the CLI uses:
+        prepare (fail-closed pre-conditions) → committed row batches with a
+        real cancel checkpoint → chain event honestly labelled."""
+        from tracefield.ingest import (
+            IngestRefusal,
+            finish_import_event,
+            prepare_import,
+            write_rows_batch,
+        )
+
+        tui = self.tui
+        db = tui.db
+        if tui.active_case_id is None or db is None:
+            tui.finish_op(OP_FAILED, exit_code=2, message="no active case")
+            tui.hint("no active case — press c to select one")
+            return
+        case = tui.case_by_id(tui.active_case_id)
+        try:
+            prepared = prepare_import(tui.settings, db, case, path)
+        except IngestRefusal as exc:
+            tui.finish_op(OP_FAILED, exit_code=3, message=str(exc))
+            tui.hint(f"import refused ({exc.reason}): {exc}")
+            return
+        except OSError as exc:
+            tui.finish_op(OP_FAILED, exit_code=1, message=str(exc))
+            tui.hint(f"import failed: {exc}")
+            return
+
+        incomplete = ""
+        obs_ids: list[str] = []
+        batch = 100
+        rows = prepared.rows
+        for start in range(0, len(rows), batch):
+            if tui.cancel_requested:
+                incomplete = "cancelled"
+                break
+            obs_ids.extend(
+                write_rows_batch(db, prepared, rows[start : start + batch])
+            )
+            tui.report_progress(len(obs_ids))
+            await asyncio.sleep(tui.chunk_delay)
+
+        event = finish_import_event(db, prepared, path, obs_ids, incomplete=incomplete)
+        if incomplete == "cancelled":
+            tui.finish_op(OP_CANCELLED, count=len(obs_ids))
+            tui.hint(
+                f"import cancelled — {len(obs_ids)} rows retained, labelled in "
+                f"event {event.id}"
+            )
+        else:
+            tui.finish_op(OP_DONE, count=len(obs_ids))
+            tui.hint(f"import done — {len(obs_ids)} rows (event {event.id})")
         self.refresh_sync()
 
 
