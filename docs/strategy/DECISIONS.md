@@ -424,3 +424,82 @@ to make it pass; if it recurs ≥2 times within any 50-run window, a timing
 instrument is added and the diagnosis re-opened; B-05 stays listed in RISK
 _REGISTER until two consecutive release batteries (plus these 18 runs)
 show no recurrence. Anti-goal: chasing a 1-in-19 phantom to extinction.
+
+## D27 — `case-import` grammar: `--file` option, not a bare positional
+
+Chosen 2026-11-08 during B-03: the import file is passed as
+`tracefield case-import --file <path>`, while status stays a plain
+subcommand (`case-import status`). Cause: Click/Typer dispatches group
+callbacks with a declared positional BEFORE subcommand resolution, so a
+bare-path grammar made the literal string `status` parse as a filename
+("File 'status' does not exist"). Renaming the subcommand or swallowing it
+with `exists=False` heuristics were the rejected alternatives — both trade
+ambiguity for grammar fidelity. The `--file` option keeps both the
+`case-import` name and an unambiguous `status`; the command's help text
+records the reason.
+
+## D28 — Batched import + honest cancellation (J7): committed batches are
+retained; a partial import is never claimed complete
+
+Chosen 2026-11-08, shipped with B-06. `run_import` decomposes into
+`prepare_import` (fail-closed pre-conditions + raw-first 0o400 copy) →
+`write_rows_batch` (per-batch commit points) → `finish_import_event`. When
+the TUI-side import op is cancelled (or a worker errors) between batches,
+already-committed rows are RETAINED — deleting live data on cancel was the
+rejected alternative, since committed rows are real observations of real
+rows the operator saw — and the chain event records
+`incomplete=<cancelled|error> rows_written=<N>` in its inputs, plus the
+report row-gap consequences stay visible in `case-import status`. A
+complete import carries NO such marker. Related invariants pinned by
+tests: the analysis event chain closes across cancelled imports
+(hash-chain-closure test); dismissed observations cannot be promoted again
+without a fresh recorded decision (R-SEC-8); the blank-reason dismissal is
+refused (exit 3) rather than recorded; and an operator-supplied
+`--tool-version` flag was deliberately NOT added — version provenance comes
+from the file's own declaration only, absent versions import as
+`unknown` (R-SEC-4, closing the forged-provenance surface).
+
+## D29 — Dismissal is terminal in 0.2; the refusal message says so honestly
+
+Chosen 2026-11-08, closing fresh-context adversarial review M-1. The
+`candidate.dismiss` action permanently closes an observation from promotion:
+there is no re-consider event type in this build (`candidate.restore` was the
+considered alternative and is deferred — a new event type needs its own
+design cycle, not a side-effect of a message change). The dismissal refusal
+now states this plainly ("that dismissal is terminal in this build (D29…
+promotion stays refused for the life of this observation") instead of the
+former text that promised a "fresh analyst decision" re-consider path that
+did not exist. Related honest-display fix: the triage overlay shows a
+dismissed observation as dismissed regardless of a later defer — what the
+UI displays must match what the state machine enforces.
+
+## D30 — Promotion records the URL provenance deliberately; boundary made
+explicit, persistence made self-grounding, re-imports never silent
+
+Chosen 2026-11-08, closing review findings m-6/m-7/m-10. Three related
+facts made explicit rather than implicit:
+
+1. **URL persistence is deliberate.** Promoting an observation copies the
+row's `url_user` into the Source locator and the `candidate.promote` event
+inputs, because the provenance must survive even if the observation is later
+pruned from the working set. This is a recorded reference, never a fetch
+(R-SEC-6 holds — the closed-input subset of `tracefield.ingest` has no
+network imports). Boundary: R-SEC-5's "secrets never echoed" applies to the
+IMPORT path — summaries/excerpts/terminal during ingest; a deliberate
+post-review provenance copy into the hash-chained ledger is the analyst's
+recorded judgment line, visible in `source list` and Runs by design.
+Operators handling credential-bearing URLs should dismiss instead of promote.
+
+2. **The Source row grounds itself.** `limitations` now carries the FULL
+file sha256, `row_record=<n>` and the observation's `raw_ref` (the former
+12-char sha truncation could not be re-grounded without the original
+observation row).
+
+3. **Re-imports are additive and named.** Re-importing byte-identical bytes
+imports again (there is no deduplication of live data by design), and the
+result now names the earlier evidence (`duplicate_of` in the payload, a
+"[yellow]note[/yellow]" line in the CLI render) — the "10 captured rows"
+story can surface as 20/30 counts, visibly and deliberately, never silently.
+Residual (accepted): `case-import status` counts observations by tool name,
+so manually created observations with `--tool sherlock` join the ingest
+totals; counts are case-scoped and tool-labelled, not import-scoped.

@@ -58,6 +58,16 @@ class MissingReasonRefusal(IngestRefusal):
     reason = "missing_reason"
 
 
+class ReviewTargetNotFound(IngestRefusal):
+    """The observation a review action targets does not exist in this case.
+
+    Maps to exit 2 (NOT_FOUND), not 3: a unreachable target is a lookup
+    miss, not a policy refusal.
+    """
+
+    reason = "not_found"
+
+
 class EvidenceIntegrityRefusal(IngestRefusal):
     """The content-addressed copy no longer matches its recorded sha256."""
 

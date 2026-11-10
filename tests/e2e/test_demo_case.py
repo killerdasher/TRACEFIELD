@@ -372,10 +372,20 @@ def test_synthetic_demo_end_to_end(demo_env) -> None:
     assert any("origin cluster" in c for c in a_before["caveats"])
 
     # Reproducibility: same store + same rules => identical assessment.
+    # The vector carries a wall-clock computed_at stamp; comparing it flakes
+    # when the two utcnow() calls straddle a tick (root cause of the
+    # 1-in-19 full-suite flake recorded as D26/B-05, identified 2026-11-08).
+    # Compare analysis fields; stamp authenticity asserted separately.
     a_again = _json(
         monkeypatch, capsys, ["analyze", "claim", claim["id"], "--case", case, "--json"]
     )
-    assert a_again == a_before, "assessment must be reproducible"
+    assert "computed_at" in a_before and "computed_at" in a_again, (
+        "the timestamp stamp must still be present in both payloads"
+    )
+    assert (
+        {k: v for k, v in a_again.items() if k != "computed_at"}
+        == {k: v for k, v in a_before.items() if k != "computed_at"}
+    ), "assessment must be reproducible"
 
     code, _, err = _run(
         monkeypatch, capsys, ["relation", "review", rel_c["id"], "--state", "confirmed"]

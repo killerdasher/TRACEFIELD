@@ -1035,6 +1035,14 @@ class TestIngest:
         )
         assert code_a == EXIT_OK
         a_json_before = json.loads(a_before)
+        # computed_at is a wall-clock stamp, not analysis state: comparing it
+        # flakes when the two utcnow() calls straddle a tick (observed once
+        # in a full-suite run 2026-11-08). Compare analysis fields only,
+        # and assert the stamp is present in both payloads.
+        a_before_core = {
+            k: v for k, v in a_json_before.items() if k != "computed_at"
+        }
+        assert "computed_at" in a_json_before
 
         obs = self._observation_ids(monkeypatch, capsys, "base")
         code, _, err = run_cli_out(
@@ -1054,7 +1062,12 @@ class TestIngest:
             ["analyze", "claim", claim_id, "--case", "base", "--json"],
         )
         assert code_a == EXIT_OK
-        assert json.loads(a_after) == a_json_before  # baseline equality holds
+        a_after = json.loads(a_after)
+        assert "computed_at" in a_after
+        assert (
+            {k: v for k, v in a_after.items() if k != "computed_at"}
+            == a_before_core
+        )  # baseline equality holds (analysis fields, stamp excluded)
 
     def test_cross_case_promotion_refused(
         self, tf_home, monkeypatch, capsys
@@ -1069,3 +1082,122 @@ class TestIngest:
         )
         assert code == EXIT_USAGE, out + err
         assert "cross-case promotion is not permitted" in self._flat(out + err)
+
+    # -- adversarial-review pins (2026-11-08) ------------------------------
+
+    def test_review_target_not_found_exits_2(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        """m-1: a review action aimed at a nonexistent observation is a
+        lookup miss (exit 2 NOT_FOUND), not a usage refusal (exit 3)."""
+        self._mkcase(monkeypatch, capsys, "nf")
+        code, out, _ = self._import(monkeypatch, capsys, "nf")
+        assert code == EXIT_OK
+        for action in ("promote", "dismiss", "defer"):
+            code, out, err = run_cli_out(
+                monkeypatch,
+                capsys,
+                [
+                    "source",
+                    action,
+                    "obs_doesnotexist",
+                    "--case",
+                    "nf",
+                    *(
+                        []
+                        if action == "promote"
+                        else ([] if action == "defer" else ["--reason", "x"])
+                    ),
+                ],
+            )
+            assert code == EXIT_NOT_FOUND, f"{action}: {out + err}"
+            assert "observation not found" in self._flat(out + err)
+
+    def test_bad_privacy_label_exit_3_and_zero_partial_writes(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        """M-2: an invalid --privacy-label used to exit 1 with a pydantic
+        traceback AND left a dangling Source row. Now: honest refusal, no
+        writes."""
+        self._mkcase(monkeypatch, capsys, "pl")
+        code, out, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            [
+                "case-import",
+                "--file",
+                str(INGEST_FIXTURE),
+                "--case",
+                "pl",
+                "--privacy-label",
+                "NOT_A_LABEL",
+                "--json",
+            ],
+        )
+        assert code == EXIT_USAGE, out + err
+        assert "privacy_label" in self._flat(out + err)
+        code, out, _ = run_cli_out(
+            monkeypatch, capsys, ["case-import", "status", "--case", "pl", "--json"]
+        )
+        assert code == EXIT_OK
+        assert json.loads(out)["observations_by_tool"] == {}
+        assert json.loads(out)["evidence_count"] == 0
+
+    def test_duplicate_import_is_noted_not_silent(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        """m-10: re-importing identical bytes is additive by design, but the
+        second run names the first evidence — the counts story stays
+        honest."""
+        self._mkcase(monkeypatch, capsys, "dupe")
+        code, _, payload_1 = self._import(monkeypatch, capsys, "dupe")
+        assert code == EXIT_OK
+        assert payload_1["duplicate_of"] == ""
+        code, _, payload_2 = self._import(monkeypatch, capsys, "dupe")
+        assert code == EXIT_OK
+        assert payload_2["duplicate_of"] == payload_1["evidence_id"]
+        # the note is honest in the human-readable render too (JSON parity
+        # carries the machine field above)
+        code, out2, err2 = run_cli_out(
+            monkeypatch, capsys,
+            ["case-import", "--file", str(INGEST_FIXTURE), "--case", "dupe"],
+        )
+        assert code == EXIT_OK, out2 + err2
+        assert "byte-identical evidence already in this case" in self._flat(out2 + err2)
+        # counts honesty: additive, visibly
+        assert payload_2["row_count"] == 10
+
+    def test_promoted_source_persists_full_provenance(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        """m-6: the Source row must be able to ground its own provenance —
+        full sha256 (not a 12-char truncation) and the row record number."""
+        self._mkcase(monkeypatch, capsys, "prov")
+        code, _, payload = self._import(monkeypatch, capsys, "prov")
+        assert code == EXIT_OK
+        sha = payload["evidence_sha256"]
+        obs = self._observation_ids(monkeypatch, capsys, "prov")
+        code, out, err = run_cli_out(
+            monkeypatch, capsys, ["source", "promote", obs[0], "--case", "prov", "--json"]
+        )
+        assert code == EXIT_OK, out + err
+        srcd = json.loads(out)["source"]
+        assert sha in srcd["limitations"], (
+            "limitations must carry the FULL sha256, not a truncation"
+        )
+        assert "row_record=" in srcd["limitations"]
+        assert "raw_ref=" in srcd["limitations"]
+
+    def test_one_shot_options_with_subcommand_refused(
+        self, tf_home, monkeypatch, capsys
+    ) -> None:
+        """nit: mixing one-shot options with the status subcommand used to
+        silently ignore the options; now it's an honest exit 3."""
+        self._mkcase(monkeypatch, capsys, "mix")
+        code, out, err = run_cli_out(
+            monkeypatch,
+            capsys,
+            ["case-import", "--file", str(INGEST_FIXTURE), "status", "--case", "mix"],
+        )
+        assert code == EXIT_USAGE, out + err
+        assert "not both" in self._flat(out + err)

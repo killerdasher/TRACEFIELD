@@ -243,24 +243,30 @@ class TriageScreen(ModalScreen[None]):
         obs_rows = sorted(
             repo.list_for_case(cid),
             key=lambda o: int(o.raw_ref.rsplit("=", 1)[1])
-            if "=row=" in o.raw_ref
+            if "#row=" in o.raw_ref
             else 10**9,
         )
         self._obs = []
         for obs in obs_rows:
             history = review_history(tui.db, cid, obs.id)
+            # Dismissal is terminal (D29): it wins over any later defer —
+            # what the overlay shows must match what the state machine
+            # enforces, not just the last recorded action.
+            actions = [ev.action for ev in history]
             state = "unreviewed"
             extra = ""
-            for ev in history:
-                if ev.action == "candidate.promote":
-                    state = "promoted"
-                elif ev.action == "candidate.dismiss":
-                    state = "dismissed"
-                    extra = (
-                        f": {ev.inputs[1]}" if len(ev.inputs) > 1 else ""
-                    )
-                elif ev.action == "candidate.defer":
-                    state = "deferred"
+            if "candidate.dismiss" in actions:
+                dismiss_ev = history[actions.index("candidate.dismiss")]
+                state = "dismissed"
+                extra = (
+                    f": {dismiss_ev.inputs[1]}"
+                    if len(dismiss_ev.inputs) > 1
+                    else ""
+                )
+            elif "candidate.defer" in actions:
+                state = "deferred"
+            elif "candidate.promote" in actions:
+                state = "promoted"
             self._obs.append(obs)
             row_no = obs.raw_ref.rsplit("=", 1)[-1]
             options_list.add_option(
@@ -821,7 +827,10 @@ class TracefieldApp(App[None]):
 
     def prompt_text(self, prompt: str, callback: Any) -> None:
         def chosen(value: str | None) -> None:
-            if value:
+            # None is the cancel path (Esc); an empty STRING is delivered
+            # so the refusing logic (e.g. blank-dismissal refusal) runs and
+            # the operator sees why — a silent no-op taught nothing.
+            if value is not None:
                 callback(value)
 
         self.push_screen(TextPromptScreen(prompt), chosen)

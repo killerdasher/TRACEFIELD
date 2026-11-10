@@ -91,12 +91,6 @@ def detect_format(path: str) -> FormatIdentity:
         # ADDITIVE extra columns (recorded as an import flag downstream —
         # never silently dropped per R-SEC-3 amendment).
         if tuple(fields[: len(spec.header)]) == spec.header:
-            if len(fields) < len(spec.header):
-                raise UnmappableFormatRefusal(
-                    f"header missing declared columns for format "
-                    f"{spec.format_name!r}: expected at least "
-                    f"{spec.header}, saw {tuple(fields)}"
-                )
             return FormatIdentity(format_name=spec.format_name)
 
     raise UnmappableFormatRefusal(

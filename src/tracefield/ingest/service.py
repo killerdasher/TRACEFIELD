@@ -35,6 +35,7 @@ from tracefield.core.domain import (
     Case,
     EvidenceItem,
     Observation,
+    PrivacyLabel,
     Source,
     SourceType,
     utcnow,
@@ -46,6 +47,7 @@ from tracefield.ingest.errors import (
     IngestRefusal,
     MissingReasonRefusal,
     OversizedFileRefusal,
+    ReviewTargetNotFound,
     RowShapeRefusal,
 )
 from tracefield.ingest.registry import (
@@ -77,6 +79,8 @@ class ImportResult(BaseModel):
     #: True when an operator cancelled mid-import (TUI op, J7); rows already
     #: committed before the cancel are retained and the event is labelled
     cancelled: bool = False
+    #: evidence id of an earlier import of byte-identical bytes ("" unique)
+    duplicate_of: str = ""
 
 
 class ProvenanceString(BaseModel):
@@ -105,8 +109,9 @@ class PreparedImport(BaseModel):
     declared_version: str
     extra_columns: list[str]
     rows: list[SherlockRow]
-    #: 1-based record number the raw_ref counter starts from
-    first_record_no: int = 2
+    #: evidence id of an already-imported file with identical bytes in this
+    #: case ("" when unique) — additive re-imports are honest-with-note
+    duplicate_of: str = ""
 
 
 def prepare_import(
@@ -126,6 +131,14 @@ def prepare_import(
     path the CLI uses.
     """
     path = Path(path)
+    # The privacy label is validated BEFORE any write so a bad value cannot
+    # leave a dangling Source row behind (adversarial review M-2,
+    # 2026-11-08); the CLI help enumerates the accepted values too.
+    valid_labels = tuple(pl.value for pl in PrivacyLabel)
+    if privacy_label not in valid_labels:
+        raise IngestRefusal(
+            f"privacy_label {privacy_label!r} is not one of {valid_labels}"
+        )
     # R-SEC-2 — size cap BEFORE parse.
     size = path.stat().st_size
     if size > settings.max_fetch_bytes:
@@ -174,6 +187,14 @@ def prepare_import(
         excerpt="",  # R-SEC-5: raw content is never copied into excerpts
         privacy_label=privacy_label,
     )
+    # Honest additive re-imports (adversarial review m-10): if this case
+    # already holds evidence whose bytes match sha-for-sha, the duplicate is
+    # imported anyway — but never silently. The flag travels on the result
+    # so the CLI/TUI can say it out loud.
+    dup = db.execute(
+        "SELECT id FROM evidence WHERE case_id=? AND sha256=? AND id<>? LIMIT 1",
+        (case.id, ev.sha256, ev.id),
+    ).fetchone()
     return PreparedImport(
         case_id=case.id,
         source_id=src.id,
@@ -186,6 +207,7 @@ def prepare_import(
         declared_version=identity.declared_version,
         extra_columns=list(parsed.extra_columns),
         rows=parsed.rows,
+        duplicate_of=(dup is not None and dup["id"]) or "",
     )
 
 
@@ -274,18 +296,27 @@ def run_import(
     batch_size = max(1, batch_size)
     obs_ids: list[str] = []
     cancelled = False
-    for start in range(0, len(prepared.rows), batch_size):
-        if should_cancel is not None and should_cancel():
-            cancelled = True
-            break
-        obs_ids.extend(
-            write_rows_batch(db, prepared, prepared.rows[start : start + batch_size])
-        )
+    try:
+        for start in range(0, len(prepared.rows), batch_size):
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
+            obs_ids.extend(
+                write_rows_batch(db, prepared, prepared.rows[start : start + batch_size])
+            )
+    except BaseException:
+        # Hard failure (storage error, disk full, abort) after some rows are
+        # already committed: still close the chain honestly. The event
+        # records the partial import as encountered (D28: a partial import
+        # is never claimed complete); the original error propagates.
+        finish_import_event(db, prepared, path, obs_ids, incomplete="error")
+        raise
 
     event = finish_import_event(
         db, prepared, path, obs_ids, incomplete="cancelled" if cancelled else ""
     )
-    return ImportResult(        case_id=prepared.case_id,
+    return ImportResult(
+        case_id=prepared.case_id,
         format_name=prepared.format_name,
         source_id=prepared.source_id,
         evidence_id=prepared.evidence_id,
@@ -297,6 +328,7 @@ def run_import(
         event_id=event.id,
         row_count=len(obs_ids),
         cancelled=cancelled,
+        duplicate_of=prepared.duplicate_of,
     )
 
 
@@ -361,7 +393,7 @@ def promote_observation(
     """
     obs = get_observation(db, obs_id)
     if obs is None:
-        raise IngestRefusal(f"observation not found: {obs_id!r}")
+        raise ReviewTargetNotFound(f"observation not found: {obs_id!r}")
     if obs.case_id != case.id:
         raise CrossCaseRefusal(
             f"observation {obs_id!r} belongs to case {obs.case_id!r}, not "
@@ -377,8 +409,9 @@ def promote_observation(
             raise IngestRefusal(
                 f"observation {obs_id!r} was dismissed by reason: "
                 f"{ev.inputs[1] if len(ev.inputs) > 1 else '(unrecorded)'} — "
-                "promoting a dismissed record requires a fresh analyst "
-                "decision recorded as a new dismiss/review event"
+                "that dismissal is terminal in this build (D29, 2026-11-08): "
+                "no re-consider event type exists, so promotion stays "
+                "refused for the life of this observation"
             )
 
     ws = CaseWorkspace(settings.cases_root, db)
@@ -405,7 +438,8 @@ def promote_observation(
             access_method=AccessMethod.MANUAL,
             limitations=(
                 f"candidate from {provenance.tool} {provenance.tool_version} "
-                f"output sha256={provenance.file_sha256[:12]} row={row.row_no}: "
+                f"output file_sha256={provenance.file_sha256} "
+                f"row_record={row.row_no} raw_ref={obs.raw_ref}: "
                 f"exists={row.exists} http_status={row.http_status}; recorded, "
                 "never verified by TRACEFIELD"
             ),
@@ -430,7 +464,7 @@ def dismiss_observation(
     """Record a reasoned dismissal (R-SEC-8: no reason → refusal)."""
     obs = get_observation(db, obs_id)
     if obs is None:
-        raise IngestRefusal(f"observation not found: {obs_id!r}")
+        raise ReviewTargetNotFound(f"observation not found: {obs_id!r}")
     if obs.case_id != case.id:
         raise CrossCaseRefusal(
             f"observation {obs_id!r} belongs to case {obs.case_id!r} — "
@@ -458,7 +492,7 @@ def defer_observation(
 ) -> AnalysisEvent:
     obs = get_observation(db, obs_id)
     if obs is None:
-        raise IngestRefusal(f"observation not found: {obs_id!r}")
+        raise ReviewTargetNotFound(f"observation not found: {obs_id!r}")
     if obs.case_id != case.id:
         raise CrossCaseRefusal(
             f"observation {obs_id!r} belongs to case {obs.case_id!r} — "

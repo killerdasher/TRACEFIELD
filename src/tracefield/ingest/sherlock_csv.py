@@ -21,7 +21,6 @@ from tracefield.ingest.registry import SUPPORTED_FORMATS
 # BEFORE any row is turned into a record.
 MAX_ROWS = 50_000
 MAX_FIELD_CHARS = 4096
-MAX_FILE_BYTES_FOR_PARSE = 64 * 1024 * 1024
 
 SHERLOCK_CSV_HEADER = SUPPORTED_FORMATS["sherlock_csv"].header
 
@@ -85,10 +84,20 @@ def parse_sherlock_csv(path: str | Path) -> ParsedSherlockCsv:
                         f"row {record_no} field {col!r} exceeds "
                         f"{MAX_FIELD_CHARS} chars — refusing the whole file"
                     )
-            if None in raw.values():
+            extras = raw.get(None)  # csv restkey: values beyond the header
+            if extras:
                 raise RowShapeRefusal(
-                    f"row {record_no} has more fields than the header "
-                    "declares; refusing the whole file"
+                    f"row {record_no} has {len(extras)} value(s) beyond the "
+                    f"header's {len(fieldnames)} columns; surplus values are "
+                    "unmappable and must never be silently dropped — "
+                    "refusing the whole file"
+                )
+            if None in raw.values():
+                missing = [c for c in fieldnames if raw.get(c) is None]
+                raise RowShapeRefusal(
+                    f"row {record_no} is missing fields {tuple(missing)} "
+                    "(fewer values than the header declares); refusing "
+                    "the whole file"
                 )
             rows.append(
                 SherlockRow(

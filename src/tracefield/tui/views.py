@@ -416,17 +416,33 @@ class MissionView(Vertical):
         obs_ids: list[str] = []
         batch = 100
         rows = prepared.rows
-        for start in range(0, len(rows), batch):
-            if tui.cancel_requested:
-                incomplete = "cancelled"
-                break
-            obs_ids.extend(
-                write_rows_batch(db, prepared, rows[start : start + batch])
-            )
-            tui.report_progress(len(obs_ids))
-            await asyncio.sleep(tui.chunk_delay)
-
-        event = finish_import_event(db, prepared, path, obs_ids, incomplete=incomplete)
+        try:
+            for start in range(0, len(rows), batch):
+                if tui.cancel_requested:
+                    incomplete = "cancelled"
+                    break
+                obs_ids.extend(
+                    write_rows_batch(db, prepared, rows[start : start + batch])
+                )
+                tui.report_progress(len(obs_ids))
+                await asyncio.sleep(tui.chunk_delay)
+            event = finish_import_event(db, prepared, path, obs_ids, incomplete=incomplete)
+        except Exception as exc:  # the op must ALWAYS reach a terminal state
+            # Hard failure after some rows committed: honest close-out — the
+            # chain event is labelled `incomplete=error rows_written=<N>`
+            # (D28) and the op reaches a terminal state, never a stuck
+            # RUNNING that wedges every later op behind "busy:".
+            try:
+                event = finish_import_event(
+                    db, prepared, path, obs_ids, incomplete="error"
+                )
+                detail = f" — event {event.id}, {len(obs_ids)} rows retained"
+            except Exception:
+                detail = ""
+            tui.finish_op(OP_FAILED, exit_code=1, message=str(exc))
+            tui.hint(f"import failed: {exc}{detail}")
+            self.refresh_sync()
+            return
         if incomplete == "cancelled":
             tui.finish_op(OP_CANCELLED, count=len(obs_ids))
             tui.hint(

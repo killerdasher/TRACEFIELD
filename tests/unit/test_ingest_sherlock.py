@@ -338,3 +338,116 @@ class TestPins:
         assert set(r1.observation_ids).isdisjoint(set(r2.observation_ids))
         # separate sources: two file imports each record their own source row
         assert r1.source_id != r2.source_id
+
+
+# ---------------------------------------------------------------------------
+# adversarial-review pins (2026-11-08): contract holes found by a
+# fresh-context reviewer and closed — pins keep the fixes, never softened
+# ---------------------------------------------------------------------------
+class TestAdversarialReviewPins:
+    def test_surplus_values_refused_never_silently_dropped(
+        self, settings, db, case_factory, tmp_path
+    ) -> None:
+        """R-SEC-3: a data row with MORE values than the header declares is
+        refused. csv.DictReader stashes surplus values under the restkey
+        (key ``None``), so the former ``None in raw.values()`` guard never
+        fired and the extra values were silently dropped — found by the
+        fresh-context review (B-1, 2026-11-08)."""
+        case = case_factory("surplus")
+        lines = FIXTURE.read_text(encoding="utf-8").splitlines()
+        row = ",".join([lines[1], "SURPLUS1,SURPLUS2"])
+        csv_file = tmp_path / "surplus.csv"
+        csv_file.write_text(lines[0] + "\r\n" + row + "\r\n", newline="")
+        with pytest.raises(RowShapeRefusal) as excinfo:
+            run_import(settings, db, case, csv_file)
+        assert "beyond the header" in str(excinfo.value)
+        assert _counts(db, case.id) == (0, 0, 0)  # nothing partially imported
+
+    def test_short_row_refusal_honestly_named_missing(
+        self, settings, db, case_factory, tmp_path
+    ) -> None:
+        """A row with FEWER values than the header is refused too, and the
+        refusal names the actual defect ('missing fields'), not the
+        opposite one (found m-5, 2026-11-08)."""
+        case = case_factory("short-row")
+        lines = FIXTURE.read_text(encoding="utf-8").splitlines()
+        row = ",".join(lines[1].split(",")[:-1])  # drop response_time_s
+        csv_file = tmp_path / "short.csv"
+        csv_file.write_text(lines[0] + "\r\n" + row + "\r\n", newline="")
+        with pytest.raises(IngestRefusal) as excinfo:
+            run_import(settings, db, case, csv_file)
+        assert "missing fields" in str(excinfo.value)
+
+    def test_bad_privacy_label_refused_before_any_write(
+        self, settings, db, case_factory
+    ) -> None:
+        """M-2 (review 2026-11-08): an invalid --privacy-label used to hit
+        pydantic AFTER the Source row was committed (dangling write) and
+        died as an untyped exception (exit 1). Now: typed refusal before
+        ANY database write."""
+        case = case_factory("privacy")
+        with pytest.raises(IngestRefusal) as excinfo:
+            run_import(settings, db, case, FIXTURE, privacy_label="NOT_A_LABEL")
+        assert "privacy_label" in str(excinfo.value)
+        assert _counts(db, case.id) == (0, 0, 0)
+
+    def test_hard_failure_mid_import_closes_chain_with_error_label(
+        self, settings, db, case_factory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M-3 (review 2026-11-08): a hard failure after some rows already
+        committed produced NO ingest.file event — the chain gap that
+        ``incomplete='error'`` was documented for but never emitted."""
+
+        import tracefield.ingest.service as svc
+        from tracefield.core.provenance import compute_event_digest
+
+        case = case_factory("err-close")
+        original = svc.write_rows_batch
+        calls = {"n": 0}
+
+        def flaky(db, prepared, rows):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("simulated storage failure")
+            return original(db, prepared, rows)
+
+        monkeypatch.setattr(svc, "write_rows_batch", flaky)
+        with pytest.raises(RuntimeError, match="simulated storage failure"):
+            run_import(settings, db, case, FIXTURE, batch_size=3)
+
+        events = db.execute(
+            "SELECT * FROM analysis_events WHERE case_id=? AND action='ingest.file'",
+            (case.id,),
+        ).fetchall()
+        assert len(events) == 1, "the partial import is closed out honestly"
+        inputs = json.loads(events[0]["inputs"])
+        assert any("incomplete=error rows_written=3" in i for i in inputs)
+        # the chain still closes despite the error label
+        chain = db.execute(
+            "SELECT * FROM analysis_events WHERE case_id=? ORDER BY occurred_at, rowid",
+            (case.id,),
+        ).fetchall()
+        prev = ""
+        for r in chain:
+            recomputed = compute_event_digest(
+                r["action"],
+                json.loads(r["inputs"]),
+                json.loads(r["outputs"]),
+                r["prev_digest"],
+                r["occurred_at"],
+            )
+            assert r["digest"] == recomputed, f"digest broken at {r['action']}"
+            assert r["prev_digest"] == prev, f"chain link broken at {r['action']}"
+            prev = recomputed
+
+    def test_duplicate_import_is_flagged_not_silent(
+        self, settings, db, case_factory
+    ) -> None:
+        """m-10 (review 2026-11-08): importing identical bytes twice stays
+        additive by design, but the second import says so via
+        duplicate_of — the 10-row story never silently becomes 20."""
+        case = case_factory("dupe")
+        r1 = run_import(settings, db, case, FIXTURE)
+        assert r1.duplicate_of == ""
+        r2 = run_import(settings, db, case, FIXTURE)
+        assert r2.duplicate_of == r1.evidence_id

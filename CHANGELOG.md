@@ -4,6 +4,95 @@ All notable changes to TRACEFIELD are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.2.0 (ingest slice), 2026-11-07 → 2026-11-08
+
+### Added
+
+- **Offline ingest (B-02)**: `src/tracefield/ingest/` — typed format
+  registry (`detect_format` + `require_supported_version`), stdlib-`csv`
+  Sherlock parser, and the import service. Fail-closed pre-conditions
+  (R-SEC-1..4): oversize refuses before parse; unrecognized headers refuse
+  the whole file with the observed header named; declared-but-unsupported
+  major versions refuse; absent versions import as `unknown`, never guessed;
+  zero-row files refuse. Rows map verbatim to observations whose `raw_ref`
+  points INTO the immutable content-addressed copy (`evidence/<2-char>/<sha>
+  #row=<record>`); file bytes are copied via the existing streamed `0o400`
+  path. Extra CSV columns are accepted but flagged in each observation's
+  summary — never dropped (R-SEC-3 amendment).
+- **`case-import` CLI (B-03)**: `case-import --file <path> --case <case>`
+  (offline; zero egress), `case-import status --case` (last import event +
+  live counts, `--json` parity), and review actions `source promote`,
+  `source dismiss --reason`, `source defer` over the same observation spine
+  with the exit-code contract (refusals → 3, not-found → 2).
+- **Review-event discipline (R-SEC-8)**: promote/dismiss/defer are
+  hash-chained analysis events; a blank `--reason` dismissal is refused; a
+  dismissed observation cannot be re-promoted without a fresh recorded
+  analyst decision; double promotion is refused. Promotion records full
+  provenance (tool, version or `unknown`, file sha256, row record number,
+  `exists`/`http_status`) on the new `Source` row and never fetches the URL.
+- **Sherlock format gate (B-01)**: real version-pinned fixture
+  `tests/fixtures/ingest/sherlock_v0.16.2_killerdasher_2026-11-07.csv`
+  (operator-owned capture, sha256 recorded) + field-level schema doc
+  (`docs/ingest/SHERLOCK_CSV_SCHEMA.md`) documenting the CRLF line endings,
+  the claimed-row-only default, the empty-`response_time_s` case, the
+  `--csv`-is-a-boolean trap, and a rotation policy (fixtures are frozen;
+  rotation is a dated, test-migrated event).
+- **TUI ingest triage (B-06)**: triage overlay on `t` (promote/dismiss with
+  reason/defer over live observations), Mission last-import block with
+  honest counts, and an in-TUI import op (`i`) built on the SAME ingest
+  code path with committed-batch cancellation: cancelled imports are
+  labelled `incomplete=cancelled rows_written=<N>` on the chain event
+  (J7); cancelled-in-flight ops are recorded in Runs.
+
+### Verified
+
+- 0.2 ingest slice battery: 369 tests (332 prior + 27 ingest + 10 adversarial-
+  review pins), ruff clean, mypy `--strict` clean — offline only; the
+  zero-egress pin test asserts importing performs no fetch; echo-sanitation
+  tests assert a secret-carrying row never leaves the immutable copy into
+  summaries, excerpts, or terminal output.
+- Ingest E2E (B-04): import → triage → relate → assess → report → export →
+  manifest verify → tamper detection, mirroring the synthetic demo's
+  honesty assertions.
+
+### Fixed
+
+Fresh-context adversarial review (2026-11-08) of the ingest slice; every
+fix is pinned by a named regression test, never softened:
+
+- **Surplus row values silently dropped** (R-SEC-3 breach): a data row with
+  more values than the header declares is now REFUSED ("beyond the header…")
+  — `csv.DictReader` stashes surplus values under its restkey, which the
+  former `None`-value guard never caught.
+- **Hard failure mid-import left commits eventless**: the chain event now
+  closes with `incomplete=error rows_written=<N>` (D28's documented
+  close-out, never actually emitted before) and the TUI import op always
+  reaches a terminal state; a chain-closure test walks the resulting chain.
+- **Invalid `--privacy-label`** exited 1 with a pydantic traceback and left
+  a dangling Source row behind: now a typed refusal (exit 3) validated
+  before any database write; the help text enumerates the four labels.
+- **Review target lookup**: promote/dismiss/defer of a nonexistent
+  observation is a NOT_FOUND (exit 2), no longer a stuttering
+  "refused (refused)" (exit 3).
+- **Dismissal refusal message promised a re-consider path that does not
+  exist** (dishonesty found by review): message now states dismissal is
+  terminal in this build (D29); the triage overlay displays the enforced
+  state (dismissal wins over a later defer), not the last action.
+- **Short-row refusals mislabeled** as "more fields": now honestly named
+  ("missing fields …").
+- **Source-row provenance truncated**: persisted `limitations` carries the
+  full file sha256, `row_record=<n>` and the raw_ref (D30); blank-reason
+  dismissal hint in the TUI is now reachable (blank submits are delivered,
+  not silently dropped); duplicate re-imports name the earlier evidence
+  instead of silently doubling counts (D30).
+- **Baseline-reproducibility flake root-caused**: the assessment vector
+  carries a wall-clock `computed_at` stamp; full-payload equality compared
+  it and flaked when two `utcnow()` calls straddled a tick. This is the
+  root cause of both the new `TestIngest` baseline flake AND the long-
+  standing 1-in-19 e2e demo flake (B-05/D26): comparisons now exclude the
+  stamp (and assert its presence), so D26's "watch" policy can retire the
+  suspicion without hiding it — stamps are still asserted present.
+
 ## [Unreleased] — 0.1.0 (pre-first-commit)
 
 Initial implementation. Shipped across the first build sessions,

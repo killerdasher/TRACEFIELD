@@ -751,7 +751,7 @@ def source_promote(
     from the sha-verified immutable evidence, never re-fetched.
     """
     from tracefield.ingest import promote_observation
-    from tracefield.ingest.errors import IngestRefusal
+    from tracefield.ingest.errors import IngestRefusal, ReviewTargetNotFound
 
     settings = load_settings()
     db = open_db(settings)
@@ -759,6 +759,8 @@ def source_promote(
         case_obj = resolve_case(CaseRepo(db), case)
         try:
             src, event, prov = promote_observation(settings, db, case_obj, observation)
+        except ReviewTargetNotFound as exc:
+            fail(f"observation not found: {exc}", EXIT_NOT_FOUND)
         except IngestRefusal as exc:
             fail(f"promote refused ({exc.reason}): {exc}", EXIT_USAGE)
 
@@ -776,9 +778,9 @@ def source_promote(
             console.print(f"  publisher:  {s(srcd['publisher'], 40)}")
             console.print(
                 f"  provenance: {prov['tool']} {prov['tool_version']} "
-                f"row={prov['row_no']} exists={s(prov['exists'], 20)} "
-                f"http_status={prov['http_status']} "
-                f"(file sha256 {prov['file_sha256'][:12]})"
+                f"row_record={prov['row_no']} exists={s(prov['exists'], 20)} "
+                f"http_status={s(prov['http_status'], 20)} "
+                f"(file sha256 {prov['file_sha256']})"
             )
             console.print(f"  event:      {p['event']['id']} (digest {p['event']['digest'][:12]})")
             console.print(f"  limitations:{' ' + s(srcd['limitations'], 160)}")
@@ -801,7 +803,7 @@ def source_dismiss(
     dismissal is an unrecorded judgment.
     """
     from tracefield.ingest import dismiss_observation
-    from tracefield.ingest.errors import IngestRefusal
+    from tracefield.ingest.errors import IngestRefusal, ReviewTargetNotFound
 
     settings = load_settings()
     db = open_db(settings)
@@ -809,6 +811,8 @@ def source_dismiss(
         case_obj = resolve_case(CaseRepo(db), case)
         try:
             event = dismiss_observation(db, case_obj, observation, reason)
+        except ReviewTargetNotFound as exc:
+            fail(f"observation not found: {exc}", EXIT_NOT_FOUND)
         except IngestRefusal as exc:
             fail(f"dismiss refused ({exc.reason}): {exc}", EXIT_USAGE)
         payload = {
@@ -836,7 +840,7 @@ def source_defer(
 ) -> None:
     """Defer one candidate observation (recorded as an event, R-SEC-8)."""
     from tracefield.ingest import defer_observation
-    from tracefield.ingest.errors import IngestRefusal
+    from tracefield.ingest.errors import IngestRefusal, ReviewTargetNotFound
 
     settings = load_settings()
     db = open_db(settings)
@@ -844,6 +848,8 @@ def source_defer(
         case_obj = resolve_case(CaseRepo(db), case)
         try:
             event = defer_observation(db, case_obj, observation, reason)
+        except ReviewTargetNotFound as exc:
+            fail(f"observation not found: {exc}", EXIT_NOT_FOUND)
         except IngestRefusal as exc:
             fail(f"defer refused ({exc.reason}): {exc}", EXIT_USAGE)
         payload = {
@@ -880,7 +886,8 @@ def caseimport_callback(
     privacy_label: str = typer.Option(
         "unknown",
         "--privacy-label",
-        help="Privacy label recorded on the imported evidence copy.",
+        help="Privacy label on the imported copy: public | sensitive | "
+        "personal | unknown. Anything else is refused (exit 3).",
     ),
     as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
 ) -> None:
@@ -891,7 +898,15 @@ def caseimport_callback(
     the word "status").
     """
     if ctx.invoked_subcommand is not None:
-        return  # a subcommand (status) handles itself
+        # A subcommand (status) handles itself — but one-shot-only options
+        # mixed with a subcommand are an operator mistake, never silence.
+        if file is not None or privacy_label != "unknown" or case is not None:
+            fail(
+                "case-import takes either one-shot options (--file/--case) "
+                "or a subcommand (status) — not both",
+                EXIT_USAGE,
+            )
+        return
     if file is None:
         fail("case-import requires --file (or use 'tracefield case-import status')", EXIT_USAGE)
     if case is None:
@@ -928,6 +943,12 @@ def _run_case_import(path: Path, case: str, privacy_label: str, as_json: bool) -
             if p["extra_columns"]:
                 console.print(
                     f"  [yellow]flag[/yellow] extra_columns: {s(','.join(p['extra_columns']), 100)}"
+                )
+            if p["duplicate_of"]:
+                console.print(
+                    f"  [yellow]note[/yellow] byte-identical evidence already in this "
+                    f"case: [bold]{p['duplicate_of']}[/bold] — imported additively "
+                    "(the row set is re-recorded, nothing is deduplicated away)"
                 )
             console.print(f"  event:     {p['event_id']}")
             console.print(

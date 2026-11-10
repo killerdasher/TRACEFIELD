@@ -202,7 +202,15 @@ def test_ingest_demo_end_to_end(tf_home, tmp_path, monkeypatch, capsys) -> None:
         capsys,
         ["analyze", "claim", claim["id"], "--case", CASE, "--json"],
     )
-    assert a_1 == a_2, "assessment must be reproducible (same store, same rules)"
+    # Reproducibility: analysis fields only — the vector carries a
+    # wall-clock computed_at stamp whose comparison flakes when the two
+    # utcnow() calls straddle a tick (root cause found 2026-11-08, see
+    # tests/e2e/test_demo_case.py note re D26/B-05).
+    assert "computed_at" in a_1 and "computed_at" in a_2
+    assert (
+        {k: v for k, v in a_1.items() if k != "computed_at"}
+        == {k: v for k, v in a_2.items() if k != "computed_at"}
+    ), "assessment must be reproducible (same store, same rules)"
 
     events = _json(
         monkeypatch,

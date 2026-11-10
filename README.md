@@ -67,6 +67,24 @@ tracefield case-export demo --output ./demo-export
 tracefield case-verify ./demo-export    # anyone can re-check the bundle
 ```
 
+### Ingest a Sherlock capture (offline)
+
+Import an existing Sherlock `--csv` result into a case — file only, no
+network, rows map verbatim to observations:
+
+```bash
+tracefield case-import --file capture.csv --case demo
+tracefield case-import status --case demo       # last import + live counts
+tracefield source promote <obs_id> --reason "'Claimed' row, URL reachable"
+tracefield source dismiss <obs_id> --reason "site returns 403 for everyone"
+tracefield source defer <obs_id>                # park it, no verdict yet
+```
+
+Refusals are typed and fail closed: oversized files, unrecognized headers,
+unsupported declared versions, and zero-row files are rejected with the
+observed facts named. Promotions/dismissals/deferrals are hash-chained; a
+dismissed observation stays dismissed until a fresh decision is recorded.
+
 Network features are opt-in and authorized: `TRACEFIELD_ALLOW_NETWORK=1`
 **and** an explicit `--fetch` flag, **plus** a recorded scope grant for the
 case (`tracefield case authorize <case> --scope "<text>" --authorized-by
@@ -124,6 +142,7 @@ manifest OK — N files re-hashed, all intact
 | Scope authorization ledger | **implemented** | `case authorize/case scope`; `source add --fetch` requires an active recorded grant; records authority, does not grant it |
 | `hash` / `inspect [--deep]` / `ocr` | **implemented** | Backends optional; UNAVAILABLE is honest |
 | `fetch --fetch` (SSRF-guarded) / `username check` | **implemented** | Fetch: opt-in + recorded scope grant; username checks: env-gated, soft-404 markers, 1 req/s, no bulk mode |
+| Offline ingest (Sherlock `--csv`) | **implemented (0.2)** | `case-import --file` + `case-import status` + `source promote/dismiss/defer`; format/version gate, fail-closed refusals, `raw_ref` into the immutable 0o400 copy, hash-chained review events, zero egress; version-pinned fixture (`sherlock_v0.16.2_…2026-11-07.csv`) + schema doc + rotation policy |
 | Tool catalogue + tiered `tools status` | **implemented** | 2,264 inert records; counts never padded |
 | TUI | **experimental** | Keyboard workflow tested headless; active-case model + `c` case picker |
 | Structured logging (JSONL audit) | **implemented** | `command`/`fail`/`unhandled` events; redacted, capped, `0600` |
