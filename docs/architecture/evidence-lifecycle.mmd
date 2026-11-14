@@ -1,0 +1,51 @@
+%% Editable source for assets/evidence-lifecycle.svg (Diagram A).
+%% The SVG is the presentation asset embedded in the README; this Mermaid
+%% markup is the keep-in-sync editable description of the same flow.
+%% Only implemented capabilities appear here — see README "Feature matrix".
+flowchart LR
+  subgraph COLLECT["01 COLLECT — the bytes enter as evidence"]
+    UP["upstream tool output / operator files
+(sherlock --csv · exiftool · ffprobe · tesseract)"]
+    SRC["source add
+Source {locator, publisher, captured_at}"]
+    IMP["case-import (0.2, offline)
+format+version gate · typed refusals exit 3
+rows → Observations; raw_ref → …#row=N"]
+    EV["evidence attach
+EvidenceItem {sha256, 0o400 copy}"]
+    AUTH["case authorize — scope ledger
+(gates --fetch; records authority)"]
+  end
+  subgraph CORROBORATE["02 CORROBORATE — the analyst decides"]
+    CLM["claim add"]
+    REL["relation add → review
+supports · corroborates · contradicts
+analyst: UNREVIEWED → CONFIRMED / REJECTED"]
+    CLU["origin clustering (advisory, hypothesis)"]
+    CON["contradiction candidates
+(always severity candidate — needs review)"]
+    TRI["ingest triage — hash-chained
+candidate.promote · dismiss · defer
+(dismissal terminal, D29)"]
+  end
+  subgraph CERTIFY["03 CERTIFY"]
+    ANA["analyze claim → AssessmentVector
+deterministic · RULE_VERSION recorded
+labels are workflow states, never probabilities"]
+    REP["report md/json/html
+caveats · rule versions · corrections append"]
+    EXP["case-export
+redact → manifest over final bytes"]
+    VER["case-verify
+anyone re-hashes; 1 tampered byte → exit 1"]
+  end
+  UP --> IMP --> EV
+  SRC --> EV
+  EV --> REL
+  IMP --> TRI
+  CLM --> REL
+  REL --> CLU
+  REL --> CON
+  REL --> ANA
+  TRI --> ANA
+  ANA --> REP --> EXP --> VER

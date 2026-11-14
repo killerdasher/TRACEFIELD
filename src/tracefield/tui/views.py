@@ -283,11 +283,7 @@ class MissionView(Vertical):
             lines.append("  none recorded — CLI case-import --file, or press i to import here")
         else:
             cancelled_input = next(
-                (
-                    i
-                    for i in last_import.inputs
-                    if i.startswith("incomplete=")
-                ),
+                (i for i in last_import.inputs if i.startswith("incomplete=")),
                 "",
             )
             label = f"  {last_import.occurred_at}  ingest.file"
@@ -421,9 +417,7 @@ class MissionView(Vertical):
                 if tui.cancel_requested:
                     incomplete = "cancelled"
                     break
-                obs_ids.extend(
-                    write_rows_batch(db, prepared, rows[start : start + batch])
-                )
+                obs_ids.extend(write_rows_batch(db, prepared, rows[start : start + batch]))
                 tui.report_progress(len(obs_ids))
                 await asyncio.sleep(tui.chunk_delay)
             event = finish_import_event(db, prepared, path, obs_ids, incomplete=incomplete)
@@ -433,9 +427,7 @@ class MissionView(Vertical):
             # (D28) and the op reaches a terminal state, never a stuck
             # RUNNING that wedges every later op behind "busy:".
             try:
-                event = finish_import_event(
-                    db, prepared, path, obs_ids, incomplete="error"
-                )
+                event = finish_import_event(db, prepared, path, obs_ids, incomplete="error")
                 detail = f" — event {event.id}, {len(obs_ids)} rows retained"
             except Exception:
                 detail = ""
@@ -446,8 +438,7 @@ class MissionView(Vertical):
         if incomplete == "cancelled":
             tui.finish_op(OP_CANCELLED, count=len(obs_ids))
             tui.hint(
-                f"import cancelled — {len(obs_ids)} rows retained, labelled in "
-                f"event {event.id}"
+                f"import cancelled — {len(obs_ids)} rows retained, labelled in event {event.id}"
             )
         else:
             tui.finish_op(OP_DONE, count=len(obs_ids))
@@ -542,7 +533,7 @@ class ClaimsView(ListView):
         return rows
 
     def render_detail(self, key: str) -> str:
-        from tracefield.core.analysis import assess_claim
+        from tracefield.core.analysis import assess_claim, clustered_origin_ids
 
         cid = self.tui.active_case_id
         claim = self.tui.claim_repo.get(key)
@@ -550,7 +541,15 @@ class ClaimsView(ListView):
             return "claim not found in the active case"
         rels = self.tui.relation_repo.list_for_case(cid)
         claim_rels = [r for r in rels if r.from_id == claim.id or r.to_id == claim.id]
-        outcome = assess_claim(claim, claim_rels, origin_clusters=0)
+        # Same shared evaluation context as the CLI analyze surface and the
+        # report: cluster count AND membership (finding A).
+        clusters = self.tui.cluster_repo.list_for_case(cid)
+        outcome = assess_claim(
+            claim,
+            claim_rels,
+            origin_clusters=len(clusters),
+            clustered_origin_ids=clustered_origin_ids(clusters),
+        )
         lines = [
             f"claim {claim.id}",
             f"  text      {sanitize_for_terminal(claim.text)}",

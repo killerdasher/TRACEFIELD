@@ -864,9 +864,7 @@ class TestIngest:
         return [o["id"] for o in obs]
 
     # -- happy path -------------------------------------------------------
-    def test_import_real_fixture_online(
-        self, tf_home, monkeypatch, capsys, tmp_path
-    ) -> None:
+    def test_import_real_fixture_online(self, tf_home, monkeypatch, capsys, tmp_path) -> None:
         self._mkcase(monkeypatch, capsys, "ing")
         code, out, payload = self._import(monkeypatch, capsys, "ing")
         assert code == EXIT_OK, out
@@ -887,9 +885,7 @@ class TestIngest:
         assert st["evidence_count"] == 1
         assert st["review_actions"] == {}
 
-    def test_refusals_exit_3(
-        self, tf_home, monkeypatch, capsys, tmp_path
-    ) -> None:
+    def test_refusals_exit_3(self, tf_home, monkeypatch, capsys, tmp_path) -> None:
         self._mkcase(monkeypatch, capsys, "ref")
 
         # zero rows (header-only)
@@ -920,9 +916,7 @@ class TestIngest:
         assert code == EXIT_USAGE, out
         assert "ingest cap" in self._flat(out)
 
-    def test_import_never_echoes_raw_content(
-        self, tf_home, monkeypatch, capsys, tmp_path
-    ) -> None:
+    def test_import_never_echoes_raw_content(self, tf_home, monkeypatch, capsys, tmp_path) -> None:
         """R-SEC-5: even a secret-carrying row stays out of the terminal."""
         self._mkcase(monkeypatch, capsys, "echo")
         secret = "SECRETCLI5f2b"
@@ -1039,9 +1033,7 @@ class TestIngest:
         # flakes when the two utcnow() calls straddle a tick (observed once
         # in a full-suite run 2026-11-08). Compare analysis fields only,
         # and assert the stamp is present in both payloads.
-        a_before_core = {
-            k: v for k, v in a_json_before.items() if k != "computed_at"
-        }
+        a_before_core = {k: v for k, v in a_json_before.items() if k != "computed_at"}
         assert "computed_at" in a_json_before
 
         obs = self._observation_ids(monkeypatch, capsys, "base")
@@ -1064,14 +1056,11 @@ class TestIngest:
         assert code_a == EXIT_OK
         a_after = json.loads(a_after)
         assert "computed_at" in a_after
-        assert (
-            {k: v for k, v in a_after.items() if k != "computed_at"}
-            == a_before_core
-        )  # baseline equality holds (analysis fields, stamp excluded)
+        assert {
+            k: v for k, v in a_after.items() if k != "computed_at"
+        } == a_before_core  # baseline equality holds (analysis fields, stamp excluded)
 
-    def test_cross_case_promotion_refused(
-        self, tf_home, monkeypatch, capsys
-    ) -> None:
+    def test_cross_case_promotion_refused(self, tf_home, monkeypatch, capsys) -> None:
         self._mkcase(monkeypatch, capsys, "ca")
         self._mkcase(monkeypatch, capsys, "cb")
         code, out, _ = self._import(monkeypatch, capsys, "cb")
@@ -1085,9 +1074,7 @@ class TestIngest:
 
     # -- adversarial-review pins (2026-11-08) ------------------------------
 
-    def test_review_target_not_found_exits_2(
-        self, tf_home, monkeypatch, capsys
-    ) -> None:
+    def test_review_target_not_found_exits_2(self, tf_home, monkeypatch, capsys) -> None:
         """m-1: a review action aimed at a nonexistent observation is a
         lookup miss (exit 2 NOT_FOUND), not a usage refusal (exit 3)."""
         self._mkcase(monkeypatch, capsys, "nf")
@@ -1143,9 +1130,7 @@ class TestIngest:
         assert json.loads(out)["observations_by_tool"] == {}
         assert json.loads(out)["evidence_count"] == 0
 
-    def test_duplicate_import_is_noted_not_silent(
-        self, tf_home, monkeypatch, capsys
-    ) -> None:
+    def test_duplicate_import_is_noted_not_silent(self, tf_home, monkeypatch, capsys) -> None:
         """m-10: re-importing identical bytes is additive by design, but the
         second run names the first evidence — the counts story stays
         honest."""
@@ -1159,7 +1144,8 @@ class TestIngest:
         # the note is honest in the human-readable render too (JSON parity
         # carries the machine field above)
         code, out2, err2 = run_cli_out(
-            monkeypatch, capsys,
+            monkeypatch,
+            capsys,
             ["case-import", "--file", str(INGEST_FIXTURE), "--case", "dupe"],
         )
         assert code == EXIT_OK, out2 + err2
@@ -1167,9 +1153,7 @@ class TestIngest:
         # counts honesty: additive, visibly
         assert payload_2["row_count"] == 10
 
-    def test_promoted_source_persists_full_provenance(
-        self, tf_home, monkeypatch, capsys
-    ) -> None:
+    def test_promoted_source_persists_full_provenance(self, tf_home, monkeypatch, capsys) -> None:
         """m-6: the Source row must be able to ground its own provenance —
         full sha256 (not a 12-char truncation) and the row record number."""
         self._mkcase(monkeypatch, capsys, "prov")
@@ -1188,9 +1172,7 @@ class TestIngest:
         assert "row_record=" in srcd["limitations"]
         assert "raw_ref=" in srcd["limitations"]
 
-    def test_one_shot_options_with_subcommand_refused(
-        self, tf_home, monkeypatch, capsys
-    ) -> None:
+    def test_one_shot_options_with_subcommand_refused(self, tf_home, monkeypatch, capsys) -> None:
         """nit: mixing one-shot options with the status subcommand used to
         silently ignore the options; now it's an honest exit 3."""
         self._mkcase(monkeypatch, capsys, "mix")

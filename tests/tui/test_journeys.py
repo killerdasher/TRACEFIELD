@@ -1219,8 +1219,6 @@ def test_workspace_switch_and_filter_baseline(tf_home, settings, db) -> None:
     assert filtered > 0
 
 
-
-
 # ---------------------------------------------------------------------------
 # B-06 / J6: import → mission last-import block → triage overlay
 # ---------------------------------------------------------------------------
@@ -1230,9 +1228,7 @@ INGEST_FIXTURE = (
     / "ingest"
     / "sherlock_v0.16.2_killerdasher_2026-11-07.csv"
 )
-INGEST_SHA256 = (
-    "29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add"
-)
+INGEST_SHA256 = "29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add"
 
 
 class TestJ6IngestTriaging:
@@ -1291,11 +1287,7 @@ class TestJ6IngestTriaging:
                 assert len(screen._obs) == 10
 
                 def idx_of(fragment: str) -> int:
-                    return next(
-                        i
-                        for i, o in enumerate(screen._obs)
-                        if fragment in o.summary
-                    )
+                    return next(i for i, o in enumerate(screen._obs) if fragment in o.summary)
 
                 opts = screen.query_one("#triage-options", OptionList)
                 for fragment in ("GitHub", "Discord"):
@@ -1344,9 +1336,7 @@ class TestJ6IngestTriaging:
                 # the same workspace is a no-op by design).
                 app.view_by_index(0).refresh_sync()
                 await pilot.pause(0.3)
-                mission_after = str(
-                    app.view_by_index(0).query_one("#mission-body").render()
-                )
+                mission_after = str(app.view_by_index(0).query_one("#mission-body").render())
                 assert "promote x2" in mission_after, mission_after
                 assert "dismiss x1" in mission_after
                 assert "defer x1" in mission_after
@@ -1373,14 +1363,12 @@ class TestJ6IngestTriaging:
             if s.limitations.startswith("candidate from")
         ]
         assert len(promoted) == 2
-        assert all(
-            "never verified by TRACEFIELD" in s.limitations for s in promoted
-        )
+        assert all("never verified by TRACEFIELD" in s.limitations for s in promoted)
         assert all(s.access_method == "manual" for s in promoted)
         actions = [e.action for e in EventRepo(check).list_for_case(case.id)]
-        assert (
-            actions.count("candidate.dismiss") == 1
-        ), "a blane blank-reason dismiss must be refused, not recorded"
+        assert actions.count("candidate.dismiss") == 1, (
+            "a blane blank-reason dismiss must be refused, not recorded"
+        )
         assert actions.count("candidate.promote") == 2
         assert actions.count("candidate.defer") == 1
         check.close()
@@ -1456,9 +1444,7 @@ class TestJ7CancelIngest:
                     await asyncio.sleep(0.01)
                 await pilot.pause(0.5)
                 status = app._status_text()
-                cancelled_log = [
-                    e for e in app.op_log if e["state"] == "cancelled"
-                ]
+                cancelled_log = [e for e in app.op_log if e["state"] == "cancelled"]
                 return str(large), cancelled_log, status, cid
 
         _path, cancelled_log, status, _cid = asyncio.run(scenario())

@@ -52,6 +52,7 @@ from tracefield.storage import CaseWorkspace, Database
 from tracefield.storage.repositories import (
     CaseRepo,
     ClaimRepo,
+    ClusterRepo,
     EventRepo,
     EvidenceRepo,
     ObservationRepo,
@@ -220,8 +221,7 @@ class TriageScreen(ModalScreen[None]):
             ),
             OptionList(id="triage-options"),
             Static(
-                "p promote · d dismiss (asks for a reason) · f defer · "
-                "Esc closes",
+                "p promote · d dismiss (asks for a reason) · f defer · Esc closes",
                 classes="overlay-note",
             ),
             id="triage-box",
@@ -242,9 +242,7 @@ class TriageScreen(ModalScreen[None]):
         repo = ObservationRepo(tui.db)
         obs_rows = sorted(
             repo.list_for_case(cid),
-            key=lambda o: int(o.raw_ref.rsplit("=", 1)[1])
-            if "#row=" in o.raw_ref
-            else 10**9,
+            key=lambda o: int(o.raw_ref.rsplit("=", 1)[1]) if "#row=" in o.raw_ref else 10**9,
         )
         self._obs = []
         for obs in obs_rows:
@@ -258,11 +256,7 @@ class TriageScreen(ModalScreen[None]):
             if "candidate.dismiss" in actions:
                 dismiss_ev = history[actions.index("candidate.dismiss")]
                 state = "dismissed"
-                extra = (
-                    f": {dismiss_ev.inputs[1]}"
-                    if len(dismiss_ev.inputs) > 1
-                    else ""
-                )
+                extra = f": {dismiss_ev.inputs[1]}" if len(dismiss_ev.inputs) > 1 else ""
             elif "candidate.defer" in actions:
                 state = "deferred"
             elif "candidate.promote" in actions:
@@ -271,9 +265,7 @@ class TriageScreen(ModalScreen[None]):
             row_no = obs.raw_ref.rsplit("=", 1)[-1]
             options_list.add_option(
                 Option(
-                    sanitize_for_terminal(
-                        f"[{state}{extra}] row {row_no}  {obs.summary}"
-                    ),
+                    sanitize_for_terminal(f"[{state}{extra}] row {row_no}  {obs.summary}"),
                     id=obs.id,
                 )
             )
@@ -306,10 +298,7 @@ class TriageScreen(ModalScreen[None]):
         except IngestRefusal as exc:
             tui.hint(f"promote refused: {exc.reason} — {exc}")
             return
-        tui.hint(
-            f"promoted → {src.id} ({prov.tool} row {prov.row_no}); "
-            "no fetch was performed"
-        )
+        tui.hint(f"promoted → {src.id} ({prov.tool} row {prov.row_no}); no fetch was performed")
         self._reload()
 
     def action_dismiss_import(self) -> None:
@@ -527,6 +516,7 @@ class TracefieldApp(App[None]):
         self.claim_repo: ClaimRepo
         self.relation_repo: RelationRepo
         self.event_repo: EventRepo
+        self.cluster_repo: ClusterRepo
 
     async def on_mount(self) -> None:
         self.settings.ensure_dirs()
@@ -538,6 +528,7 @@ class TracefieldApp(App[None]):
         self.claim_repo = ClaimRepo(self.db)
         self.relation_repo = RelationRepo(self.db)
         self.event_repo = EventRepo(self.db)
+        self.cluster_repo = ClusterRepo(self.db)
         self.cases = self.case_repo.list()
         # TS-1: 1 case auto-selects; 0/2+ never guess silently.
         if len(self.cases) == 1:

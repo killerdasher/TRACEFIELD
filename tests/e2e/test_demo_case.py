@@ -382,10 +382,9 @@ def test_synthetic_demo_end_to_end(demo_env) -> None:
     assert "computed_at" in a_before and "computed_at" in a_again, (
         "the timestamp stamp must still be present in both payloads"
     )
-    assert (
-        {k: v for k, v in a_again.items() if k != "computed_at"}
-        == {k: v for k, v in a_before.items() if k != "computed_at"}
-    ), "assessment must be reproducible"
+    assert {k: v for k, v in a_again.items() if k != "computed_at"} == {
+        k: v for k, v in a_before.items() if k != "computed_at"
+    }, "assessment must be reproducible"
 
     code, _, err = _run(
         monkeypatch, capsys, ["relation", "review", rel_c["id"], "--state", "confirmed"]

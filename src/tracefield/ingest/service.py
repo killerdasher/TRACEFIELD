@@ -136,9 +136,7 @@ def prepare_import(
     # 2026-11-08); the CLI help enumerates the accepted values too.
     valid_labels = tuple(pl.value for pl in PrivacyLabel)
     if privacy_label not in valid_labels:
-        raise IngestRefusal(
-            f"privacy_label {privacy_label!r} is not one of {valid_labels}"
-        )
+        raise IngestRefusal(f"privacy_label {privacy_label!r} is not one of {valid_labels}")
     # R-SEC-2 — size cap BEFORE parse.
     size = path.stat().st_size
     if size > settings.max_fetch_bytes:
@@ -222,11 +220,7 @@ def write_rows_batch(
     a subsequent batch is cancelled, and the case event records the cancel.
     """
     observations = ObservationRepo(db)
-    flag = (
-        f" extra_columns={','.join(prepared.extra_columns)}"
-        if prepared.extra_columns
-        else ""
-    )
+    flag = f" extra_columns={','.join(prepared.extra_columns)}" if prepared.extra_columns else ""
     obs_ids: list[str] = []
     for row in rows:
         obs = observations.add(
@@ -236,10 +230,7 @@ def write_rows_batch(
                 tool_name=prepared.tool,
                 tool_version=prepared.tool_version,
                 raw_ref=f"{prepared.storage_ref}#row={row.row_no}",
-                summary=(
-                    f"{row.name}: exists={row.exists} http_status={row.http_status}"
-                    f"{flag}"
-                ),
+                summary=(f"{row.name}: exists={row.exists} http_status={row.http_status}{flag}"),
             )
         )
         obs_ids.append(obs.id)
@@ -332,7 +323,6 @@ def run_import(
     )
 
 
-
 def get_observation(db: Database, obs_id: str) -> Observation | None:
     r = db.execute("SELECT * FROM observations WHERE id=?", (obs_id,)).fetchone()
     if r is None:
@@ -402,9 +392,7 @@ def promote_observation(
     history = _review_events(db, case.id, obs_id)
     for ev in history:
         if ev.action == "candidate.promote":
-            raise IngestRefusal(
-                f"observation {obs_id!r} was already promoted (event {ev.id})"
-            )
+            raise IngestRefusal(f"observation {obs_id!r} was already promoted (event {ev.id})")
         if ev.action == "candidate.dismiss":
             raise IngestRefusal(
                 f"observation {obs_id!r} was dismissed by reason: "
@@ -472,8 +460,7 @@ def dismiss_observation(
         )
     if not reason.strip():
         raise MissingReasonRefusal(
-            "dismiss requires a --reason; a bare dismissal is an unrecorded "
-            "judgment and is refused"
+            "dismiss requires a --reason; a bare dismissal is an unrecorded judgment and is refused"
         )
     return _append_event(
         db,
@@ -542,9 +529,8 @@ def _read_row_from_evidence(
                     http_status=raw.get("http_status") or "",
                     response_time_s=raw.get("response_time_s") or "",
                 )
-        raise RowShapeRefusal(
-            f"row {row_no} absent from stored copy (file has {current} records)"
-        )
+        raise RowShapeRefusal(f"row {row_no} absent from stored copy (file has {current} records)")
+
 
 def _append_event(
     db: Database, case_id: str, action: str, inputs: list[str], outputs: list[str]

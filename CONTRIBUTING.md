@@ -69,6 +69,29 @@ Open an "adapter proposal" issue before writing code. Minimum contract:
 - Rate limits and politeness: respect 429/403 with backoff; never circumvent
   a block; default to ≤1 request/second for profile checks.
 
+## Where to start
+
+Good first contributions are ones the test suite already frames. Discuss
+first in an issue (state the acceptance), then keep the PR small:
+
+- **TUI journeys from the spec.** `docs/strategy/TUI_INTERACTION_SPEC.md`
+  lists specified interaction requirements (TS-series) whose tests are the
+  acceptance criteria; the TUI is `experimental` by honest label, and every
+  addition must keep the keymap-parity test green.
+- **Backend-spec verification.** `ffprobe-streams` and `tesseract-ocr`
+  adapters are `spec-only` (see README's adapter note): install the backend,
+  prove the adapter end-to-end, and propose the `integrated` state change
+  with the evidence.
+- **Ingest formats.** Any new format (e.g. a Maigret export) must follow the
+  B-01 gate proven by the Sherlock slice: a real version-pinned operator
+  fixture plus a field-level schema doc come *before* parser code — see
+  `docs/ingest/SHERLOCK_CSV_SCHEMA.md` and `docs/strategy/DECISIONS.md`.
+- **Docs/consistency fixes** in README or `docs/strategy/` should cite the
+  code or test that proves the corrected statement.
+
+Never open a PR with a capability the code cannot demonstrate: the gates
+below (and review) will refuse it.
+
 ## Code conventions
 
 - Python ≥3.11 target (`target-version = "py311"`), strict typing, no

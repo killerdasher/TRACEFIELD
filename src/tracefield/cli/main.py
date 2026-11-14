@@ -1014,9 +1014,7 @@ def caseimport_status(
             for tool, n in p["observations_by_tool"].items():
                 console.print(f"  observations: {tool} x {n}")
             for action, n in (
-                p["review_actions"]
-                if p["review_actions"]
-                else {"(no review actions yet)": 0}
+                p["review_actions"] if p["review_actions"] else {"(no review actions yet)": 0}
             ).items():
                 console.print(f"  review:   {action} x {n}")
 
@@ -1586,17 +1584,14 @@ def analyze_claim_cmd(
         claim_rels = [r for r in relations if r.from_id == claim.id or r.to_id == claim.id]
         # Relations whose from_id is a source supporting this claim via evidence.
         clusters = ClusterRepo(db).list_for_case(case_obj.id)
-        clustered_ids: set[str] = set()
-        for c in clusters:
-            clustered_ids.update(c.member_ids)
 
-        from tracefield.core.analysis import assess_claim
+        from tracefield.core.analysis import assess_claim, clustered_origin_ids
 
         v = assess_claim(
             claim,
             claim_rels,
             origin_clusters=len(clusters),
-            clustered_origin_ids=clustered_ids,
+            clustered_origin_ids=clustered_origin_ids(clusters),
         )
 
         def render(p: dict[str, Any]) -> None:

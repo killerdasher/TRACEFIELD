@@ -12,7 +12,7 @@ from typing import Any
 
 from tracefield import __version__
 from tracefield.config import Settings
-from tracefield.core.analysis import assess_claim
+from tracefield.core.analysis import assess_claim, clustered_origin_ids
 from tracefield.core.domain import Case, CaseReport, utcnow
 from tracefield.storage.database import Database
 from tracefield.storage.repositories import (
@@ -44,10 +44,19 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
     observations = ObservationRepo(db).list_for_case(case.id)
 
     assessments = []
+    clustered_ids = clustered_origin_ids(clusters)
     for claim in claims:
         claim_rels = [r for r in relations if r.from_id == claim.id or r.to_id == claim.id]
         # Also treat relations where the claim is the subject via evidence links.
-        v = assess_claim(claim, claim_rels, origin_clusters=len(clusters))
+        # Same evaluation context as the CLI analyze surface: cluster count
+        # AND membership, so the report can never re-interpret the evidence
+        # and disagree with `analyze claim` on the same case state.
+        v = assess_claim(
+            claim,
+            claim_rels,
+            origin_clusters=len(clusters),
+            clustered_origin_ids=clustered_ids,
+        )
         assessments.append(v.model_dump())
 
     return {

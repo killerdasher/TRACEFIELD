@@ -105,9 +105,9 @@ class TestFixtureLoad:
 # ---------------------------------------------------------------------------
 def _counts(db, case_id: str) -> tuple[int, int, int]:
     ev = db.execute("SELECT COUNT(*) c FROM evidence WHERE case_id=?", (case_id,)).fetchone()["c"]
-    ob = db.execute(
-        "SELECT COUNT(*) c FROM observations WHERE case_id=?", (case_id,)
-    ).fetchone()["c"]
+    ob = db.execute("SELECT COUNT(*) c FROM observations WHERE case_id=?", (case_id,)).fetchone()[
+        "c"
+    ]
     sr = db.execute("SELECT COUNT(*) c FROM sources WHERE case_id=?", (case_id,)).fetchone()["c"]
     return ev, ob, sr
 
@@ -181,7 +181,9 @@ class TestRefusals:
         header = lines[0].split(",")
         col = header.index("response_time_s")
         body = [",".join(h for i, h in enumerate(header) if i != col)]
-        body += [",".join(v for i, v in enumerate(line.split(",")) if i != col) for line in lines[1:]]
+        body += [
+            ",".join(v for i, v in enumerate(line.split(",")) if i != col) for line in lines[1:]
+        ]
         mutated = tmp_path / "mutated.csv"
         mutated.write_text("\r\n".join(body) + "\r\n", newline="")
         with pytest.raises(IngestRefusal) as excinfo:
@@ -191,9 +193,7 @@ class TestRefusals:
         assert "http_status" not in str(excinfo.value).split("header")[0]
         assert _counts(db, case.id) == (0, 0, 0)
 
-    def test_parser_rejects_missing_and_reordered_headers_directly(
-        self, tmp_path
-    ) -> None:
+    def test_parser_rejects_missing_and_reordered_headers_directly(self, tmp_path) -> None:
         """Second line of defense: the parser itself fails closed when
         called directly on a non-additive mutation."""
         seven_missing = tmp_path / "seven.csv"
@@ -309,9 +309,7 @@ class TestPins:
         assert all("extra_columns=site_note" in o.summary for o in obs)
         assert "site_note" not in SHERLOCK_CSV_HEADER  # known header untouched
 
-    def test_promotion_recovers_exactly_the_pointed_row(
-        self, settings, db, case_factory
-    ) -> None:
+    def test_promotion_recovers_exactly_the_pointed_row(self, settings, db, case_factory) -> None:
         """raw_ref counts file RECORDS (header = record 1). Promoting the
         GitHub observation must recover the GitHub URL, not a row off by
         one."""
@@ -378,9 +376,7 @@ class TestAdversarialReviewPins:
             run_import(settings, db, case, csv_file)
         assert "missing fields" in str(excinfo.value)
 
-    def test_bad_privacy_label_refused_before_any_write(
-        self, settings, db, case_factory
-    ) -> None:
+    def test_bad_privacy_label_refused_before_any_write(self, settings, db, case_factory) -> None:
         """M-2 (review 2026-11-08): an invalid --privacy-label used to hit
         pydantic AFTER the Source row was committed (dangling write) and
         died as an untyped exception (exit 1). Now: typed refusal before
@@ -440,9 +436,7 @@ class TestAdversarialReviewPins:
             assert r["prev_digest"] == prev, f"chain link broken at {r['action']}"
             prev = recomputed
 
-    def test_duplicate_import_is_flagged_not_silent(
-        self, settings, db, case_factory
-    ) -> None:
+    def test_duplicate_import_is_flagged_not_silent(self, settings, db, case_factory) -> None:
         """m-10 (review 2026-11-08): importing identical bytes twice stays
         additive by design, but the second import says so via
         duplicate_of — the 10-row story never silently becomes 20."""

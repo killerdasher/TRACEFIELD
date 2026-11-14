@@ -75,8 +75,7 @@ def parse_sherlock_csv(path: str | Path) -> ParsedSherlockCsv:
             record_no += 1
             if record_no > MAX_ROWS + 1:
                 raise RowShapeRefusal(
-                    f"row count exceeds the ingest bound ({MAX_ROWS} rows); "
-                    "refusing the whole file"
+                    f"row count exceeds the ingest bound ({MAX_ROWS} rows); refusing the whole file"
                 )
             for col, value in raw.items():
                 if value is not None and len(value) > MAX_FIELD_CHARS:
@@ -113,9 +112,7 @@ def parse_sherlock_csv(path: str | Path) -> ParsedSherlockCsv:
             )
 
     if not rows:
-        raise ZeroRowsRefusal(
-            "file parsed to zero data rows (header only) — nothing to import"
-        )
+        raise ZeroRowsRefusal("file parsed to zero data rows (header only) — nothing to import")
     return ParsedSherlockCsv(extra_columns=extra_columns, rows=rows)
 
 

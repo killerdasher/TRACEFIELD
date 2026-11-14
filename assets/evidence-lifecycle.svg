@@ -1,0 +1,244 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800" role="img" aria-labelledby="lc-title lc-desc">
+  <title id="lc-title">TRACEFIELD evidence lifecycle — from a tool output or source record to an independently re-verifiable export</title>
+  <desc id="lc-desc">Four-column workflow diagram of the implemented TRACEFIELD evidence lifecycle. Column 1 (collect): an upstream tool output or recorded source becomes content-addressed 0400 evidence via attach or the offline case-import gate. Column 2 (corroborate): the analyst adds claims, relations with explicit review states, advisory origin clustering, and contradiction candidates; ingest observations are promoted, dismissed or deferred as hash-chained events. Column 3 (certify): a deterministic assessment vector with a recorded rule version feeds reports with caveats, then a redact-then-manifest export that anyone can re-verify with sha256sum. A full-width hash-chain spine at the bottom lists the real analysis_events actions: source.add, evidence.attach, observation.add, ingest.file, relation.add, candidate.promote, analyze.origins, report.correction.</desc>
+
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#1c1c24" stroke-width="0.6"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8b8b9a"/>
+    </marker>
+    <marker id="arrowHi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#c4b5fd"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="800" fill="#101014"/>
+  <rect width="1280" height="800" fill="url(#grid)"/>
+
+  <!-- ============ zone headers ============ -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="40" y="38" font-size="13" fill="#c4b5fd" letter-spacing="4">01 COLLECT</text>
+    <text x="180" y="38" font-size="11.5" fill="#8b8b9a">the bytes enter as evidence</text>
+    <line x1="40" y1="48" x2="408" y2="48" stroke="#2a2a35"/>
+    <text x="452" y="38" font-size="13" fill="#c4b5fd" letter-spacing="4">02 CORROBORATE</text>
+    <text x="712" y="38" font-size="11" fill="#8b8b9a">the analyst decides</text>
+    <line x1="452" y1="48" x2="820" y2="48" stroke="#2a2a35"/>
+    <text x="864" y="38" font-size="13" fill="#c4b5fd" letter-spacing="4">03 CERTIFY</text>
+    <text x="1030" y="38" font-size="11" fill="#8b8b9a">re-checkable by anyone</text>
+    <line x1="864" y1="48" x2="1240" y2="48" stroke="#2a2a35"/>
+  </g>
+
+  <!-- ============ column 1 ============ -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <!-- 01 upstream output -->
+    <rect x="40" y="62" width="368" height="106" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="40" y="62" width="4" height="106" fill="#2a2a35"/>
+    <text x="58" y="84" font-size="12.5" fill="#d4d4dc" font-weight="bold">upstream tool output / operator files</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="58" y="104">sherlock --csv · exiftool · ffprobe · tesseract</text>
+      <text x="58" y="120">operator-supplied captures (only what the</text>
+      <text x="58" y="135">operator already ran — nothing re-fetched)</text>
+      <text x="58" y="156" fill="#fbbf24" opacity="0.75">catalogue verified 10 · indexed 2,254 · adapters integrated 1</text>
+    </g>
+
+    <!-- 02 sources -->
+    <rect x="40" y="186" width="368" height="70" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="40" y="186" width="4" height="70" fill="#2a2a35"/>
+    <text x="58" y="208" font-size="12.5" fill="#d4d4dc" font-weight="bold">source add — a Source is a record, not a visit</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="58" y="228">locator · publisher · source_type · limitations</text>
+      <text x="58" y="243">captured_at recorded; --fetch is separately gated</text>
+    </g>
+
+    <!-- 03 ingest -->
+    <rect x="40" y="274" width="368" height="106" rx="3" fill="#14141a" stroke="#c4b5fd" stroke-opacity="0.45"/>
+    <rect x="40" y="274" width="4" height="106" fill="#c4b5fd" opacity="0.6"/>
+    <text x="58" y="296" font-size="12.5" fill="#d4d4dc" font-weight="bold">case-import — offline ingest gate (0.2)</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="58" y="316">detect_format + require_supported_version</text>
+      <text x="58" y="331">oversize / unknown header / unsupported version /</text>
+      <text x="58" y="346">zero rows → typed refusal, exit 3, zero partial writes</text>
+      <text x="58" y="361">file bytes verbatim in a content-addressed copy</text>
+      <text x="58" y="376" fill="#c4b5fd" opacity="0.8">rows map to Observations; raw_ref → …&lt;sha&gt;#row=N</text>
+    </g>
+
+    <!-- 04 evidence attach -->
+    <rect x="40" y="398" width="368" height="90" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="40" y="398" width="4" height="90" fill="#2a2a35"/>
+    <text x="58" y="420" font-size="12.5" fill="#d4d4dc" font-weight="bold">evidence attach — EvidenceItem</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="58" y="440">streamed copy, chmod 0o400 after copy</text>
+      <text x="58" y="455">content address: evidence/&lt;2char&gt;/&lt;sha256&gt;</text>
+      <text x="58" y="470">excerpt = "" — raw content is never copied out</text>
+    </g>
+
+    <!-- scope ledger -->
+    <rect x="40" y="504" width="368" height="64" rx="3" fill="#101014" stroke="#4f4b42" stroke-dasharray="4 3"/>
+    <rect x="40" y="504" width="4" height="64" fill="#fbbf24" opacity="0.5"/>
+    <text x="58" y="526" font-size="12.5" fill="#d4d4dc" font-weight="bold">case authorize — scope ledger (gates fetch)</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="58" y="546">network needs the ledger grant + --fetch + env flag</text>
+      <text x="58" y="561">records authority, cannot verify authority</text>
+    </g>
+  </g>
+
+  <!-- ============ column 2 ============ -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="452" y="62" width="368" height="62" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="452" y="62" width="4" height="62" fill="#2a2a35"/>
+    <text x="470" y="84" font-size="12.5" fill="#d4d4dc" font-weight="bold">claim add</text>
+    <text x="470" y="104" font-size="10.5" fill="#8b8b9a">Claim — the proposition under test</text>
+
+    <rect x="452" y="140" width="368" height="118" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="452" y="140" width="4" height="118" fill="#2a2a35"/>
+    <text x="470" y="162" font-size="12.5" fill="#d4d4dc" font-weight="bold">relation add → review — analyst decides</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="470" y="182">supports · corroborates · contradicts</text>
+      <text x="470" y="197">derived_from · mentions · origin_hypothesis</text>
+      <text x="470" y="212">each carries a rationale + evidence_ids</text>
+      <text x="470" y="233" fill="#c4b5fd" opacity="0.8">review_state: UNREVIEWED → CONFIRMED / REJECTED</text>
+      <text x="470" y="248">machine suggestions are never evidence (INSUFFICIENT)</text>
+    </g>
+
+    <rect x="452" y="274" width="368" height="76" rx="3" fill="#14141a" stroke="#4f4b42" stroke-dasharray="4 3"/>
+    <rect x="452" y="274" width="4" height="76" fill="#8b8b9a"/>
+    <text x="470" y="296" font-size="12.5" fill="#d4d4dc" font-weight="bold">origin clustering — advisory</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="470" y="316">containment r3 over ordered k=3–5 shingles</text>
+      <text x="470" y="331">splits syndicated copies; hypothesis until confirmed</text>
+    </g>
+
+    <rect x="452" y="366" width="368" height="70" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="452" y="366" width="4" height="70" fill="#2a2a35"/>
+    <text x="470" y="388" font-size="12.5" fill="#d4d4dc" font-weight="bold">contradiction candidates</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="470" y="408">dates · digests · quantities</text>
+      <text x="470" y="423">always severity "candidate" — requires analyst review</text>
+    </g>
+
+    <rect x="452" y="452" width="368" height="94" rx="3" fill="#14141a" stroke="#c4b5fd" stroke-opacity="0.45"/>
+    <rect x="452" y="452" width="4" height="94" fill="#c4b5fd" opacity="0.6"/>
+    <text x="470" y="474" font-size="12.5" fill="#d4d4dc" font-weight="bold">ingest triage — hash-chained decisions</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="470" y="494">candidate.promote · dismiss (reason required) · defer</text>
+      <text x="470" y="509">provenance persists on the Source row: tool, version,</text>
+      <text x="470" y="524">file sha256, row_record, exists/http_status</text>
+      <text x="470" y="540" fill="#fbbf24" opacity="0.75">dismissal is terminal for that observation (D29)</text>
+    </g>
+  </g>
+
+  <!-- ============ column 3 ============ -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="864" y="62" width="376" height="118" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="864" y="62" width="4" height="118" fill="#2a2a35"/>
+    <text x="882" y="84" font-size="12.5" fill="#d4d4dc" font-weight="bold">analyze claim → AssessmentVector</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="882" y="104">CORROBORATED_WITH_LIMITATIONS · CONTESTED</text>
+      <text x="882" y="119">CONTRADICTED_BY_AVAILABLE_EVIDENCE · …</text>
+      <text x="882" y="134">deterministic decision table; RULE_VERSION recorded</text>
+      <text x="882" y="149">provenance_completeness: rationale AND evidence_ids</text>
+      <text x="882" y="170" fill="#c4b5fd" opacity="0.8">outcome labels are workflow states — never probabilities</text>
+    </g>
+
+    <rect x="864" y="196" width="376" height="70" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="864" y="196" width="4" height="70" fill="#2a2a35"/>
+    <text x="882" y="218" font-size="12.5" fill="#d4d4dc" font-weight="bold">report — md / json / html</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="882" y="238">caveats · rule versions · author identity (or "not set")</text>
+      <text x="882" y="253">report-correct appends corrections; never silent rewrites</text>
+    </g>
+
+    <rect x="864" y="282" width="376" height="88" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="864" y="282" width="4" height="88" fill="#2a2a35"/>
+    <text x="882" y="304" font-size="12.5" fill="#d4d4dc" font-weight="bold">case-export — redact, then manifest</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="882" y="324">manifest.json built over the FINAL (redacted) bytes</text>
+      <text x="882" y="339">export README lists SENSITIVE_METADATA by key name</text>
+      <text x="882" y="354">dissemination register records shipped revisions</text>
+    </g>
+
+    <rect x="864" y="386" width="376" height="86" rx="3" fill="#14141a" stroke="#4ade80" stroke-opacity="0.35"/>
+    <rect x="864" y="386" width="4" height="86" fill="#4ade80" opacity="0.55"/>
+    <text x="882" y="408" font-size="12.5" fill="#d4d4dc" font-weight="bold">case-verify — trust needs no TRACEFIELD</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="882" y="428">re-hashes every shipped file against the manifest</text>
+      <text x="882" y="443">one tampered byte → digest mismatch → exit 1</text>
+      <text x="882" y="458">sha256sum agrees with the manifest by construction</text>
+    </g>
+  </g>
+
+  <!-- ============ arrows ============ -->
+  <g fill="none" stroke="#8b8b9a" stroke-width="1.3">
+    <!-- upstream → ingest gate -->
+    <path d="M224 168 L224 270" marker-end="url(#arrow)"/>
+    <!-- source add → evidence -->
+    <path d="M150 256 L150 394" stroke-dasharray="3 3" opacity="0.7"/>
+    <!-- ingest → evidence (the import attaches the copy) -->
+    <path d="M300 380 L300 394" marker-end="url(#arrow)"/>
+    <!-- collect → corroborate -->
+    <path d="M408 437 L436 437 L436 200 L448 200" marker-end="url(#arrow)"/>
+    <path d="M408 328 L424 328 L424 500 L448 500" marker-end="url(#arrowHi)"/>
+    <!-- within col2 -->
+    <path d="M636 124 L636 136" marker-end="url(#arrow)"/>
+    <path d="M660 258 L660 270" marker-end="url(#arrow)"/>
+    <path d="M636 350 L636 362" marker-end="url(#arrow)"/>
+    <!-- corroborate → certify -->
+    <path d="M820 168 L848 168 L848 120 L860 120" marker-end="url(#arrowHi)"/>
+    <path d="M820 400 L848 400 L848 200 L860 200" marker-end="url(#arrow)"/>
+    <!-- certify chain -->
+    <path d="M1052 180 L1052 192" marker-end="url(#arrow)"/>
+    <path d="M1052 266 L1052 278" marker-end="url(#arrow)"/>
+    <path d="M1052 370 L1052 382" marker-end="url(#arrow)"/>
+    <!-- export → independent verify -->
+    <path d="M1052 472 L1052 500 L1076 500" marker-end="url(#arrow)"/>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="1084" y="485" width="156" height="30" rx="3" fill="#101014" stroke="#4f4b42" stroke-dasharray="4 3"/>
+    <text x="1094" y="498" font-size="9.5" fill="#8b8b9a">independent re-check,</text>
+    <text x="1094" y="510" font-size="9.5" fill="#8b8b9a">any machine: sha256sum -c</text>
+  </g>
+
+  <!-- side annotation: the inspect/hash/ocr field tools -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="40" y="580" width="782" height="42" rx="3" fill="#101014" stroke="#4f4b42" stroke-dasharray="4 3"/>
+    <text x="58" y="598" font-size="10.5" fill="#8b8b9a">same-file field tools: tracefield hash · inspect [--deep] · ocr — derive facts from attached bytes;</text>
+    <text x="58" y="614" font-size="10.5" opacity="0.75" fill="#8b8b9a">missing backends report UNAVAILABLE, never success · username check is env-gated, curated, 1 req/s</text>
+  </g>
+
+  <!-- ============ hash-chain spine ============ -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="40" y="638" width="1200" height="126" rx="3" fill="#14141a" stroke="#2a2a35"/>
+    <rect x="40" y="638" width="1200" height="24" rx="3" fill="#2a2a35" opacity="0.35"/>
+    <text x="58" y="654" font-size="11" fill="#c4b5fd" opacity="0.85">analysis_events — append-only, SHA-256 hash-chained (every step emits one; each chain head embeds the previous digest)</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <rect x="58" y="676" width="142" height="24" fill="none" stroke="#2a2a35"/>
+      <text x="66" y="692">source.add 40ffc689</text>
+      <rect x="216" y="676" width="168" height="24" fill="none" stroke="#2a2a35"/>
+      <text x="224" y="692">evidence.attach 5ee0e44c</text>
+      <rect x="400" y="676" width="168" height="24" fill="none" stroke="#2a2a35"/>
+      <text x="408" y="692">observation.add 0bbe9ddb</text>
+      <rect x="584" y="676" width="158" height="24" fill="none" stroke="#2a2a35"/>
+      <text x="592" y="692">relation.add 7c3199d7</text>
+      <rect x="758" y="676" width="182" height="24" fill="none" stroke="#2a2a35"/>
+      <text x="766" y="692">analyze.origins acf8b80a</text>
+      <rect x="956" y="676" width="170" height="24" fill="none" stroke="#4ade80" stroke-opacity="0.4"/>
+      <text x="964" y="692" fill="#4ade80" opacity="0.9">chain: VERIFIED — 16 events</text>
+      <g stroke="#5c5c6b" stroke-width="1">
+        <line x1="200" y1="688" x2="216" y2="688"/><line x1="384" y1="688" x2="400" y2="688"/>
+        <line x1="568" y1="688" x2="584" y2="688"/><line x1="742" y1="688" x2="758" y2="688"/>
+        <line x1="940" y1="688" x2="956" y2="688"/>
+      </g>
+      <rect x="58" y="710" width="154" height="24" fill="none" stroke="#c4b5fd" stroke-opacity="0.4"/>
+      <text x="66" y="726">ingest.file 23d61086</text>
+      <rect x="228" y="710" width="188" height="24" fill="none" stroke="#c4b5fd" stroke-opacity="0.4"/>
+      <text x="236" y="726">candidate.promote 0c744957</text>
+      <rect x="432" y="710" width="176" height="24" fill="none" stroke="#2a2a35"/>
+      <text x="440" y="726">candidate.dismiss · defer</text>
+      <text x="624" y="726" font-size="10" opacity="0.85">ingest row is actual output: docs/demo/INGEST_CAPTURE.txt —</text>
+      <text x="624" y="740" font-size="10" opacity="0.85">tamper-evident within this store's threat model; not a blockchain.</text>
+      <text x="58" y="758" font-size="10" opacity="0.8">digests above are actual CLI output, quoted from the committed captures: top row = docs/demo/DEMO_SESSION.txt (16 events, chain VERIFIED); ingest row = docs/demo/INGEST_CAPTURE.txt</text>
+    </g>
+  </g>
+</svg>

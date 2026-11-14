@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-labelledby="tf-title tf-desc">
+  <title id="tf-title">TRACEFIELD — the provenance and continuity layer between OSINT collection and the report</title>
+  <desc id="tf-desc">Dark graphite banner on a fine survey grid with faint contour traces. The wordmark TRACEFIELD sits over a highlighted hash-trace underline, with the tagline "the provenance &amp; continuity layer between OSINT collection and the report" and three status chips: hash-chained, local-first, alpha.</desc>
+
+  <defs>
+    <!-- fine survey grid -->
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#2a2a35" stroke-width="1"/>
+    </pattern>
+    <pattern id="gridFine" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M8 0H0V8" fill="none" stroke="#2a2a35" stroke-width="0.4" opacity="0.5"/>
+    </pattern>
+    <linearGradient id="traceUnder" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c4b5fd" stop-opacity="0.05"/>
+      <stop offset="0.55" stop-color="#c4b5fd" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#c4b5fd" stop-opacity="0.25"/>
+    </linearGradient>
+    <radialGradient id="cornerGlow" cx="0.08" cy="0.05" r="0.9">
+      <stop offset="0" stop-color="#c4b5fd" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#c4b5fd" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#c4b5fd" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- base -->
+  <rect width="1280" height="320" fill="#101014"/>
+  <rect width="1280" height="320" fill="url(#gridFine)"/>
+  <rect width="1280" height="320" fill="url(#grid)"/>
+  <rect width="1280" height="320" fill="url(#cornerGlow)"/>
+
+  <!-- contour traces: evidence paths running left to right -->
+  <g fill="none" stroke="#c4b5fd" stroke-width="1">
+    <path d="M-20 250 C 240 190, 430 285, 660 230 S 1080 160, 1300 205" opacity="0.16"/>
+    <path d="M-20 270 C 260 210, 450 300, 680 245 S 1090 180, 1300 225" opacity="0.10"/>
+    <path d="M-20 230 C 230 175, 420 270, 650 215 S 1070 140, 1300 185" opacity="0.06"/>
+  </g>
+  <g fill="none" stroke="#8b8b9a" stroke-width="1">
+    <path d="M-20 60 C 250 20, 460 95, 700 55 S 1080 5, 1300 45" opacity="0.10"/>
+    <path d="M-20 80 C 255 42, 465 112, 705 72 S 1085 22, 1300 62" opacity="0.06"/>
+  </g>
+
+  <!-- evidence-path nodes: small plot markers along the contour -->
+  <g fill="#c4b5fd">
+    <rect x="240" y="222" width="6" height="6" transform="rotate(45 243 225)" opacity="0.55"/>
+    <rect x="525" y="251" width="6" height="6" transform="rotate(45 528 254)" opacity="0.40"/>
+    <rect x="812" y="198" width="6" height="6" transform="rotate(45 815 201)" opacity="0.55"/>
+    <rect x="1062" y="170" width="6" height="6" transform="rotate(45 1065 173)" opacity="0.40"/>
+  </g>
+  <!-- record-index ticks: real identifiers from the reproducible capture -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" fill="#8b8b9a" opacity="0.5">
+    <text x="846" y="190">row_record=2</text>
+    <text x="420" y="296">sha256:293096045646…2add (capture fixture)</text>
+  </g>
+
+  <!-- frame -->
+  <rect x="10" y="10" width="1260" height="300" fill="none" stroke="#2a2a35" stroke-width="1.5"/>
+  <!-- corner ticks -->
+  <g stroke="#8b8b9a" stroke-width="1.5">
+    <path d="M10 44V10h34" fill="none"/>
+    <path d="M1270 44V10h-34" fill="none"/>
+    <path d="M10 276v34h34" fill="none"/>
+    <path d="M1270 276v34h-34" fill="none"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="94" y="150" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="72" font-weight="700" fill="#d4d4dc" letter-spacing="14">TRACEFIELD</text>
+  <!-- hash-trace underline -->
+  <rect x="96" y="170" width="640" height="3" fill="url(#traceUnder)"/>
+  <rect x="734" y="165" width="13" height="13" fill="none" stroke="#c4b5fd" stroke-width="2" transform="rotate(45 740 171)"/>
+
+  <text x="96" y="212" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#8b8b9a" letter-spacing="0.4">the provenance &amp; continuity layer between OSINT collection and the report</text>
+  <text x="96" y="238" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#8b8b9a" opacity="0.75">every artifact re-verifiable with sha256sum — assessments are workflow states, never probabilities</text>
+
+  <!-- status chips -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">
+    <rect x="96" y="254" width="98" height="21" fill="none" stroke="#2a2a35" stroke-width="1"/>
+    <text x="104" y="269" fill="#8b8b9a">hash-chained</text>
+    <rect x="204" y="254" width="76" height="21" fill="none" stroke="#2a2a35" stroke-width="1"/>
+    <text x="212" y="269" fill="#8b8b9a">local-first</text>
+    <rect x="290" y="254" width="44" height="21" fill="none" stroke="#fbbf24" stroke-width="1"/>
+    <text x="298" y="269" fill="#fbbf24" opacity="0.9">alpha</text>
+  </g>
+
+  <!-- right-side: stage-index card — actual CLI output excerpt, docs/demo/DEMO_SESSION.txt (events of the 16-event verified chain) -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="960" y="58" width="240" height="188" fill="#14141a" stroke="#2a2a35" stroke-width="1"/>
+    <rect x="960" y="58" width="240" height="26" fill="#2a2a35" opacity="0.4"/>
+    <text x="972" y="75" font-size="11" fill="#c4b5fd" opacity="0.8">analysis_events (chain)</text>
+    <g font-size="10.5" fill="#8b8b9a">
+      <text x="972" y="102">source.add      40ffc689</text>
+      <text x="972" y="120">evidence.attach 5ee0e44c</text>
+      <text x="972" y="138">observation.add 0bbe9ddb</text>
+      <text x="972" y="156">relation.add    7c3199d7</text>
+      <text x="972" y="174">analyze.origins acf8b80a</text>
+    </g>
+    <line x1="972" y1="184" x2="1188" y2="184" stroke="#2a2a35"/>
+    <text x="972" y="202" font-size="10.5" fill="#4ade80" opacity="0.85">chain: VERIFIED — 16 events</text>
+    <text x="972" y="218" font-size="9" fill="#8b8b9a" opacity="0.8">excerpt: docs/demo/DEMO_SESSION.txt</text>
+    <text x="972" y="232" font-size="9" fill="#8b8b9a" opacity="0.6">ingest row: docs/demo/INGEST_CAPTURE.txt</text>
+  </g>
+</svg>

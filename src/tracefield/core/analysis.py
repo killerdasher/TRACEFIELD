@@ -7,9 +7,12 @@ states with documented criteria, not probabilities.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from tracefield.core.domain import (
     AssessmentVector,
     Claim,
+    OriginCluster,
     OutcomeLabel,
     Relation,
     RelationType,
@@ -17,6 +20,22 @@ from tracefield.core.domain import (
 )
 
 RULE_VERSION = "assess-r2"
+
+
+def clustered_origin_ids(clusters: Iterable[OriginCluster]) -> set[str]:
+    """Shared evaluation context: every member id appearing in ANY origin
+    cluster (confirmed or not — clustering is a hypothesis, but it is
+    enough to break an independence claim, per the documented criteria).
+
+    Every assessment surface (CLI ``analyze claim``, report generation,
+    TUI claim detail) must derive this value through this function and
+    pass it as ``clustered_origin_ids`` so equivalent case state always
+    yields equivalent assessment vectors, regardless of the surface.
+    """
+    ids: set[str] = set()
+    for cluster in clusters:
+        ids.update(cluster.member_ids)
+    return ids
 
 
 def assess_claim(
@@ -150,15 +169,49 @@ def assess_claim(
                 "At least one confirmed supporting relation, but fewer than "
                 "two confirmed independent origins or no corroboration edge."
             )
-    elif unreviewed_supports:
-        v.outcome = OutcomeLabel.INSUFFICIENT_EVIDENCE
-        v.caveats.append(
-            "Supporting relations exist but none are analyst-confirmed. "
-            "Unreviewed machine suggestions are not evidence."
-        )
     else:
-        v.outcome = OutcomeLabel.UNASSESSED
-        v.caveats.append("No supporting or contradicting relations recorded.")
+        pending = [r for r in relations if r.review_state == ReviewState.UNREVIEWED]
+        rejected = [r for r in relations if r.review_state == ReviewState.REJECTED]
+        unresolved = [r for r in relations if r.review_state == ReviewState.UNRESOLVED]
+        pending_contradicts = [r for r in pending if r.relation == RelationType.CONTRADICTS]
+        if unreviewed_supports:
+            v.outcome = OutcomeLabel.INSUFFICIENT_EVIDENCE
+            v.caveats.append(
+                "Supporting relations exist but none are analyst-confirmed. "
+                "Unreviewed machine suggestions are not evidence."
+            )
+        elif pending:
+            # Relations DO exist — the recorded state is "awaiting review",
+            # not "no relations". Documented criteria: only unreviewed
+            # relations => INSUFFICIENT_EVIDENCE, contradiction relations
+            # included (an unreviewed contradiction is a candidate, never
+            # a finding).
+            v.outcome = OutcomeLabel.INSUFFICIENT_EVIDENCE
+            if pending_contradicts:
+                v.caveats.append(
+                    f"{len(pending_contradicts)} contradiction relation(s) "
+                    "awaiting analyst review; nothing is confirmed until "
+                    "an analyst decides. Unreviewed relations are not "
+                    "evidence."
+                )
+            else:
+                v.caveats.append(
+                    f"{len(pending)} relation(s) awaiting analyst review; "
+                    "no confirmed support or contradiction yet."
+                )
+        elif rejected or unresolved:
+            # Relations recorded and decided — none confirmed. Say what
+            # the stored state is; never imply nothing was recorded.
+            v.outcome = OutcomeLabel.UNASSESSED
+            v.caveats.append(
+                f"{len(relations)} relation(s) recorded but none confirmed: "
+                f"{len(rejected)} rejected, {len(unresolved)} unresolved. "
+                "No confirmed support or contradiction in available "
+                "evidence."
+            )
+        else:
+            v.outcome = OutcomeLabel.UNASSESSED
+            v.caveats.append("No supporting or contradicting relations recorded.")
 
     if origin_clusters and v.outcome in (
         OutcomeLabel.CORROBORATED_WITH_LIMITATIONS,

@@ -30,10 +30,15 @@
 
 ## 3. Trust boundaries
 
-1. **Network is OFF by default.** Network access requires *both*
-   `TRACEFIELD_ALLOW_NETWORK=1` and a per-operation `--fetch`
-   (doubly-opt-in). The SSRF guard is per-request and is *not* defeated by a
-   global override — a `--fetch` against loopback/metadata still exits 4.
+1. **Network is OFF by default.** A case fetch requires *all three* of
+   `TRACEFIELD_ALLOW_NETWORK=1`, a per-operation `--fetch`, and an **active
+   recorded scope-authorization grant for the case** (`case authorize`;
+   latest decision wins — a later `--revoke` blocks again). The SSRF guard
+   is per-request and is *not* defeated by any of those opt-ins — a
+   `--fetch` against loopback/metadata still exits 4. `username check` is
+   a separate, case-less network path gated only by
+   `TRACEFIELD_USERNAME_CHECK=1` (curated providers, 1 req/s, no bulk
+   mode); it is not ledger-gated because it is not tied to a case.
 2. **Subprocess boundary.** Only three allowlisted local utilities may run;
    they never receive a shell, never inherit ambient env, and their output is
    size-capped and treated as untrusted text.
@@ -55,9 +60,15 @@
 - **No retention/erasure guarantees yet.** We can delete a case's files; we
   cannot claim erasure from backups we do not control. Honest deletion
   semantics are planned, not shipped.
-- **No scope ledger yet.** Declared purpose/scope is recorded but not yet
-  *gated* — collection is not blocked for material outside the declared scope.
-  This is a known gap (OOVS-01 stays NOT_ASSESSED until it is).
+- **Authorization is recorded *and* enforced — as described, and nothing
+  more.** The scope ledger (Phase 11) makes a case fetch require an active
+  recorded grant (OOVS-01 self-assessment: `PASS (scoped)`, pinned by
+  CLI tests: no-grant blocks exit 4, grant passes the gate, revoke
+  blocks again). It *records who authorized what collection*; it cannot
+  verify legal authority, the scope text is free-form, and the
+  host-mentioned-in-scope check is a soft advisory, not semantic parsing.
+  A recorded entry is a decision trail, not proof that every future
+  operation is lawful or in-scope.
 
 ## 5. Residual risks accepted (with rationale)
 

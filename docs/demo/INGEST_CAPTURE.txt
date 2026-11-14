@@ -1,0 +1,30 @@
+$ tracefield case-import --file capture.csv --case demo
+imported sherlock_csv — 10 observations src_c64223d0f7d147fd/ev_fbac126e64a74d7a
+  sha256:    29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add
+  storage:   
+evidence/29/29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add 
+(immutable copy)
+  version:   not declared by file → recorded as unknown
+  event:     aev_0a70cc756f0e40d1
+observations are raw returns — not verified facts until reviewed
+
+$ tracefield case-import status --case demo
+last import aev_0a70cc756f0e40d1
+  occurred: 2026-11-10T14:16:20Z
+  action:   ingest.file (digest 23d6108613df)
+  input:    /tmp/tracefield-capture/work/capture.csv
+  input:    29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add
+  evidence: 1
+  observations: sherlock x 10
+  review:   (no review actions yet) x 0
+
+$ tracefield source promote obs_890682bf26fa4304 --case demo
+promoted observation → source src_b5e93104ca934a41
+  locator:    https://www.7cups.com/@killerdasher
+  publisher:  7Cups
+  provenance: sherlock unknown row_record=2 exists=Claimed http_status=202 (file
+sha256 29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add)
+  event:      aev_9a38b05bf8b848c2 (digest 0c7449576457)
+  limitations: candidate from sherlock unknown output 
+file_sha256=29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add 
+row_record=2 raw_ref=evidence/29/2930960456…

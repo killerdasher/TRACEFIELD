@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="sp-title sp-desc">
+  <title id="sp-title">TRACEFIELD — hash-chained evidence, local-first OSINT case workbench</title>
+  <desc id="sp-desc">Social preview card, dark graphite over a fine survey grid with contour traces: the TRACEFIELD wordmark, the tagline "the provenance &amp; continuity layer between OSINT collection and the report", a short honesty line, and a small chain motif labelled "analysis_events — chain: VERIFIED".</desc>
+
+  <defs>
+    <pattern id="sgrid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#2a2a35" stroke-width="1"/>
+    </pattern>
+    <pattern id="sgridFine" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M8 0H0V8" fill="none" stroke="#2a2a35" stroke-width="0.4" opacity="0.5"/>
+    </pattern>
+    <linearGradient id="straceUnder" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c4b5fd" stop-opacity="0.05"/>
+      <stop offset="0.55" stop-color="#c4b5fd" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#c4b5fd" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="#101014"/>
+  <rect width="1280" height="640" fill="url(#sgridFine)"/>
+  <rect width="1280" height="640" fill="url(#sgrid)"/>
+
+  <g fill="none" stroke="#c4b5fd" stroke-width="1">
+    <path d="M-20 520 C 260 420, 470 560, 700 470 S 1090 330, 1300 420" opacity="0.18"/>
+    <path d="M-20 550 C 270 445, 490 585, 720 490 S 1100 355, 1300 450" opacity="0.10"/>
+    <path d="M-20 490 C 250 395, 460 535, 690 445 S 1080 305, 1300 395" opacity="0.06"/>
+  </g>
+  <g fill="none" stroke="#8b8b9a" stroke-width="1">
+    <path d="M-20 120 C 260 70, 480 160, 720 105 S 1090 40, 1300 100" opacity="0.10"/>
+  </g>
+  <g fill="#c4b5fd">
+    <rect x="436.5" y="501.5" width="7" height="7" transform="rotate(45 440 505)" opacity="0.45"/>
+    <rect x="696.5" y="466.5" width="7" height="7" transform="rotate(45 700 470)" opacity="0.55"/>
+    <rect x="996.5" y="391.5" width="7" height="7" transform="rotate(45 1000 395)" opacity="0.4"/>
+  </g>
+
+  <!-- frame + corner ticks -->
+  <g stroke="#8b8b9a" stroke-width="1.5">
+    <path d="M12 60V12h48" fill="none"/>
+    <path d="M1268 60V12h-48" fill="none"/>
+    <path d="M12 580v48h48" fill="none"/>
+    <path d="M1268 580v48h-48" fill="none"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="110" y="238" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="104" font-weight="700" fill="#d4d4dc" letter-spacing="20">TRACEFIELD</text>
+  <rect x="112" y="266" width="840" height="4" fill="url(#straceUnder)"/>
+  <rect x="946" y="255" width="19" height="19" fill="none" stroke="#c4b5fd" stroke-width="2.5" transform="rotate(45 955 264)"/>
+
+  <text x="112" y="330" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="26" fill="#8b8b9a">the provenance &amp; continuity layer between OSINT collection and the report</text>
+
+  <text x="112" y="384" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#8b8b9a" opacity="0.8">hash-chained actions · content-addressed evidence · assessments are workflow states</text>
+  <text x="112" y="410" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" fill="#8b8b9a" opacity="0.8">never probabilities · exports re-verifiable with sha256sum</text>
+
+  <!-- chain motif chip (honest labels: events exist, card is illustrative) -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="112" y="446" width="356" height="44" fill="#14141a" stroke="#2a2a35"/>
+    <text x="128" y="464" font-size="12" fill="#c4b5fd" opacity="0.85">analysis_events</text>
+    <text x="128" y="480" font-size="11.5" fill="#8b8b9a">source.add → evidence.attach → relation.add</text>
+    <text x="488" y="480" font-size="12" fill="#4ade80" opacity="0.9">→ chain: VERIFIED</text>
+  </g>
+
+  <!-- status chips -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
+    <rect x="1108" y="560" width="112" height="30" fill="none" stroke="#fbbf24" stroke-width="1.2"/>
+    <text x="1124" y="580" fill="#fbbf24" opacity="0.9">alpha</text>
+    <rect x="992" y="560" width="108" height="30" fill="none" stroke="#2a2a35"/>
+    <text x="1006" y="580" fill="#8b8b9a">local-first</text>
+    <rect x="876" y="560" width="108" height="30" fill="none" stroke="#2a2a35"/>
+    <text x="884" y="580" fill="#8b8b9a">no telemetry</text>
+  </g>
+</svg>

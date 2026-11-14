@@ -29,9 +29,7 @@ FIXTURE = (
     / "ingest"
     / "sherlock_v0.16.2_killerdasher_2026-11-07.csv"
 )
-FIXTURE_SHA256 = (
-    "29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add"
-)
+FIXTURE_SHA256 = "29309604564665664f9757623b9ee67f63f08bd5c61c25a01da708b791d62add"
 
 CASE = "OPERATOR-OWNED-ingest-demo-killerdasher"
 
@@ -126,7 +124,15 @@ def test_ingest_demo_end_to_end(tf_home, tmp_path, monkeypatch, capsys) -> None:
     _run(
         monkeypatch,
         capsys,
-        ["source", "dismiss", aniworld["id"], "--case", CASE, "--reason", "poster-detection false positive cluster"],
+        [
+            "source",
+            "dismiss",
+            aniworld["id"],
+            "--case",
+            CASE,
+            "--reason",
+            "poster-detection false positive cluster",
+        ],
     )
     _run(monkeypatch, capsys, ["source", "defer", f3["id"], "--case", CASE])
     promoted = _json(
@@ -181,8 +187,7 @@ def test_ingest_demo_end_to_end(tf_home, tmp_path, monkeypatch, capsys) -> None:
             "--evidence",
             ev_id,
             "--rationale",
-            "CSV copy row records exists=Claimed http_status=200 for the "
-            "GitHub profile URL",
+            "CSV copy row records exists=Claimed http_status=200 for the GitHub profile URL",
             "--json",
         ],
     )
@@ -207,10 +212,9 @@ def test_ingest_demo_end_to_end(tf_home, tmp_path, monkeypatch, capsys) -> None:
     # utcnow() calls straddle a tick (root cause found 2026-11-08, see
     # tests/e2e/test_demo_case.py note re D26/B-05).
     assert "computed_at" in a_1 and "computed_at" in a_2
-    assert (
-        {k: v for k, v in a_1.items() if k != "computed_at"}
-        == {k: v for k, v in a_2.items() if k != "computed_at"}
-    ), "assessment must be reproducible (same store, same rules)"
+    assert {k: v for k, v in a_1.items() if k != "computed_at"} == {
+        k: v for k, v in a_2.items() if k != "computed_at"
+    }, "assessment must be reproducible (same store, same rules)"
 
     events = _json(
         monkeypatch,

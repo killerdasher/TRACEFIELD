@@ -1,5 +1,13 @@
 # TRACEFIELD
 
+<p align="center">
+  <img src="assets/tracefield-banner.svg" alt="TRACEFIELD — graphite banner on a fine survey grid with contour traces: the provenance &amp; continuity layer between OSINT collection and the report; chips: hash-chained, local-first, alpha; an analysis_events ledger card excerpt with chain: VERIFIED." width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/killerdasher/TRACEFIELD/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/killerdasher/TRACEFIELD/actions/workflows/ci.yml/badge.svg"></a>
+</p>
+
 **TRACEFIELD is the provenance and continuity layer between OSINT collection
 and the report.** It is not a collector and not another tool list: you keep
 using Sherlock, Maigret, SpiderFoot, ExifTool and the Bellingcat toolkit —
@@ -9,16 +17,33 @@ probability, and exports a bundle whose integrity anyone can re-check with
 `sha256sum`. Its catalogue's honesty is that it counts what it has *not*
 verified.
 
-> **Status:** alpha (v0.1.0, pre-first-release). Terminal-first CLI + optional
-> TUI. Local-first: no telemetry, no chatbot, no cloud dependency. All output
-> below is from a **synthetic demonstration case** with fixture data.
+> **Status:** alpha (v0.1.0 released; the 0.2 offline-ingest slice is on
+> `main`). Terminal-first CLI + optional TUI. Local-first: no telemetry, no
+> chatbot, no cloud dependency. All demonstration output below is from
+> **synthetic fixture cases** — no real persons, no live targets.
+>
+> CI note (honest badge): the py3.11–3.13 test jobs, mypy `--strict` and
+> pip-audit pass on the latest commit. The lint job's earlier red state was
+> a version drift: the project allowed any ruff `>=0.16,<1`, and 0.17.x
+> format rules changed for 13 files while CI resolved a newer ruff than
+> dev machines had. Fixed: the tree now pins **`ruff==0.17.1`** exactly in
+> `pyproject.toml` and adopts that formatter's output (`ruff format src
+> tests` applied, verified whitespace-only). Pushing this tree greens the
+> lint job; the exact pin keeps dev and CI byte-identical.
 
-## Why
+## What it does, in one pass
 
-OSINT findings rarely survive the trip from collection to report with intact
-provenance. Links rot, screenshots lose their chain of custody, "two sources
-said so" often means "one wire story was copied twice", and tool catalogues
-pad their counts. TRACEFIELD exists to close that gap with three rules:
+The image below is a **real capture** of the 0.2 offline ingest: a copy of
+the version-pinned Sherlock fixture (byte-identical, sha256-verified) imported
+into a fresh synthetic case, then one observation promoted with full
+provenance. The box is a faithful render of actual CLI output — the raw text
+capture lives in [`docs/demo/INGEST_CAPTURE.txt`](docs/demo/INGEST_CAPTURE.txt).
+
+<p align="center">
+  <img src="assets/demo-terminal.png" alt="Terminal capture: case-import --file capture.csv imports 10 observations with sha256 and an event id; case-import status shows live counts; source promote records provenance (tool, version unknown, row_record=2, exists=Claimed) as a hash-chained event." width="100%">
+</p>
+
+Concretely:
 
 1. **Every artifact is content-addressed and re-verifiable** without the tool
    (`sha256sum` agrees with our manifests).
@@ -27,7 +52,12 @@ pad their counts. TRACEFIELD exists to close that gap with three rules:
 3. **Every count is tiered and dated** — indexed ≠ verified ≠ integrated ≠
    healthy.
 
-## What this is not
+## Why
+
+OSINT findings rarely survive the trip from collection to report with intact
+provenance. Links rot, screenshots lose their chain of custody, "two sources
+said so" often means "one wire story was copied twice", and tool catalogues
+pad their counts. TRACEFIELD exists to close that gap.
 
 Not novel, and never claimed as such: content hashing, EXIF/ffprobe metadata
 reading, tesseract OCR wrapping, "a big list of OSINT tools", username
@@ -35,7 +65,7 @@ enumeration, case folders, content-addressed evidence stores (git and other
 CAS designs predate this), SQLite storage, JSON output, secret redaction.
 Competitor facts: `docs/strategy/COMPETITOR_MATRIX.md` (dated, sourced).
 
-## Install (development)
+## Try it — five minutes, no network
 
 ```bash
 python3 -m venv .venv
@@ -46,8 +76,6 @@ python3 -m venv .venv
 Requires Python ≥3.11 (CI tests 3.11–3.13). Optional backends — `exiftool`,
 `ffprobe`, `tesseract` — are detected at runtime and reported UNAVAILABLE
 honestly if missing.
-
-## Five-minute first case
 
 ```bash
 tracefield doctor                       # local environment, never network
@@ -75,15 +103,16 @@ network, rows map verbatim to observations:
 ```bash
 tracefield case-import --file capture.csv --case demo
 tracefield case-import status --case demo       # last import + live counts
-tracefield source promote <obs_id> --reason "'Claimed' row, URL reachable"
+tracefield source promote <obs_id> --case demo  # records provenance, never fetches
 tracefield source dismiss <obs_id> --reason "site returns 403 for everyone"
 tracefield source defer <obs_id>                # park it, no verdict yet
 ```
 
 Refusals are typed and fail closed: oversized files, unrecognized headers,
 unsupported declared versions, and zero-row files are rejected with the
-observed facts named. Promotions/dismissals/deferrals are hash-chained; a
-dismissed observation stays dismissed until a fresh decision is recorded.
+observed facts named, before anything is written. Review actions are
+hash-chained; a dismissed observation stays dismissed until a fresh recorded
+decision exists.
 
 Network features are opt-in and authorized: `TRACEFIELD_ALLOW_NETWORK=1`
 **and** an explicit `--fetch` flag, **plus** a recorded scope grant for the
@@ -92,42 +121,52 @@ case (`tracefield case authorize <case> --scope "<text>" --authorized-by
 re-validated per request and per redirect, and connections are pinned to
 pre-validated addresses.
 
-### Author identity (per operator)
+## The evidence lifecycle
 
-Reports assert whose analysis they are. Set it once, in **your** operator
-config — `~/.config/tracefield/config.toml`:
+Everything above, as one picture. Dashed outlines mark advisory or gated
+surfaces; solid cards are the enforced path. Every step emits an event in the
+hash chain at the bottom.
 
-```toml
-report_author = "your name — your contact route"
+<p align="center">
+  <img src="assets/evidence-lifecycle.svg" alt="Evidence lifecycle: upstream tool output and source records flow through the offline case-import gate or evidence attach into content-addressed 0400 evidence; the analyst adds claims, relations (supports/corroborates/contradicts, unreviewed-then-confirmed), advisory origin clustering, contradiction candidates, and hash-chained promote/dismiss/defer triage; a deterministic assessment vector with a recorded rule version feeds reports with caveats, then a redact-then-manifest export that anyone re-verifies with sha256sum; below, the real analysis_events hash chain from the demo capture ends in chain: VERIFIED." width="100%">
+</p>
+
+SHA-256 proves byte-level integrity of the stored object, not truthfulness,
+authorship, or authenticity. That sentence is a product guarantee, not a
+disclaimer. The diagram's editable Mermaid source:
+`docs/architecture/evidence-lifecycle.mmd`.
+
+## One real assessment, verbatim
+
+From a synthetic run of the real CLI — the same 0.2 ingest workflow shown in
+the terminal capture above (no network, fixture data, no real persons; the
+committed end-to-end demo is `docs/demo/DEMO_SESSION.txt`):
+
 ```
-
-`TRACEFIELD_REPORT_AUTHOR` overrides it. Accepted keys are allowlisted and
-config errors fail closed (`tracefield doctor` shows the effective author and
-any config problem). There is deliberately no tool-wide default author: an
-unset report says `author not set`, never someone else's name.
-
-### Synthetic demonstration transcript
-
-Excerpt from the labelled synthetic fixture case (identical flow exercised by
-`tests/e2e/test_demo_case.py`; no real people or incidents):
-
-```
-$ tracefield analyze claim claim_5f2a… --case demo --json
+$ tracefield analyze claim clm_4ddf… --case demo --json
 {
-  "outcome": "CORROBORATED_WITH_LIMITATIONS",
-  "supporting_count": 2,
+  "claim_id": "clm_4ddf62b1c61a416b",
+  "provenance_completeness": "complete",
+  "evidence_directness": "linked",
+  "independence": "1 confirmed origin(s), none clustered",
+  "source_transparency": "partial",
+  "temporal_fit": "unknown",
+  "supporting_count": 1,
   "contradicting_count": 0,
-  "rule_version": "assess-2",
+  "missing_information": "see caveats",
+  "reproducibility": "deterministic rules assess-r2",
+  "outcome": "SUPPORTED_BUT_UNCONFIRMED",
   "caveats": [
-    "2 confirmed independent origins with at least one corroboration
-     relation. Independence rests on the absence of origin-cluster
-     membership; confirm clustering review state before relying on this
-     label."
-  ]
+    "At least one confirmed supporting relation, but fewer than two confirmed independent origins or no corroboration edge.",
+    "Missing data is not evidence of absence. These labels are workflow states with documented criteria, not probabilities of truth."
+  ],
+  "rule_version": "assess-r2"
 }
-$ tracefield case-verify ./demo-export
-manifest OK — N files re-hashed, all intact
 ```
+
+Every field above is reproduced as the CLI printed it, including the
+single-line caveat strings; only the wall-clock `computed_at` field is
+omitted, for legibility.
 
 ## Feature matrix (honest status)
 
@@ -144,46 +183,37 @@ manifest OK — N files re-hashed, all intact
 | `fetch --fetch` (SSRF-guarded) / `username check` | **implemented** | Fetch: opt-in + recorded scope grant; username checks: env-gated, soft-404 markers, 1 req/s, no bulk mode |
 | Offline ingest (Sherlock `--csv`) | **implemented (0.2)** | `case-import --file` + `case-import status` + `source promote/dismiss/defer`; format/version gate, fail-closed refusals, `raw_ref` into the immutable 0o400 copy, hash-chained review events, zero egress; version-pinned fixture (`sherlock_v0.16.2_…2026-11-07.csv`) + schema doc + rotation policy |
 | Tool catalogue + tiered `tools status` | **implemented** | 2,264 inert records; counts never padded |
-| TUI | **experimental** | Keyboard workflow tested headless; active-case model + `c` case picker |
+| TUI | **experimental** | Keyboard workflow tested headless; active-case model + `c` case picker; ingest triage overlay (`t`) and cancellable import op (`i`) |
 | Structured logging (JSONL audit) | **implemented** | `command`/`fail`/`unhandled` events; redacted, capped, `0600` |
 | Health-check job for catalogue rows | **not built, by decision** | `catalog stale` lists freshness (overdue/unparseable dates), explicitly not a health verdict; upstream verification is operator-manual |
 | Perceptual hashing for images | **planned** | |
 | Plugin/adapter entry points | **implemented** | Typed `ToolAdapter` boundary in `src/tracefield/adapters.py`; `integration_state=integrated` requires an adapter proven end-to-end; proposal flow in CONTRIBUTING |
 | Retention / erasure workflow | **planned** | |
 
-## Evidence flow (how a conclusion traces to bytes)
+## Reproducible synthetic demonstration
 
-```
-source add ──► Source (locator, captured_at, limitations)
-                  │
-evidence attach ──► EvidenceItem (sha256, 0o400 copy under <case>/evidence/)
-                  │         └──► analysis_event (hash-chained, prev_digest)
-claim add ──────► Claim (the proposition under test)
-relation add ───► Relation (from/to, type, rationale, evidence_ids)
-relation review ┘   └──► analyst marks CONFIRMED / REJECTED
-analyze claim ──────► AssessmentVector (outcome + caveats + RULE_VERSION)
-report / case-export ─► report.md/json + manifest.json (digests of final bytes)
-case-verify ──────────► re-hashes every file against the manifest
-```
-
-SHA-256 proves byte-level integrity of the stored object, not truthfulness,
-authorship, or authenticity. That sentence is a product guarantee, not a
-disclaimer.
-
-## Synthetic demonstration (reproducible)
-
-The full workflow above runs end-to-end on a fully synthetic case — fictional
-company, generated fixtures, no network, no real persons — through the real
-CLI binary:
+The full workflow above runs end-to-end on a fully synthetic case through the
+real CLI binary:
 
 - `docs/demo/run_synthetic_demo.sh` — the reproducible script (fresh
   `TRACEFIELD_HOME` each run).
 - `docs/demo/DEMO_SESSION.txt` — a recorded terminal session of that script
-  (plain text, captured with `script`, ANSI stripped).
+  (plain text, captured with `script`, ANSI stripped; last refreshed
+  2026-11-10 against the current build).
 - `tests/e2e/test_demo_case.py` — the same workflow as a test with hard
   assertions (clustering merges syndicated copies, contradictions stay
-  candidates until reviewed, assessment is byte-reproducible, a tampered
-  export fails `case-verify`).
+  candidates until reviewed, assessment analysis fields are reproducible, a
+  tampered export fails `case-verify`).
+- One loop of the recorded walkthrough (real terminal, real CLI, pacing
+  added; provenance in `docs/demo/README.md`):
+
+<p align="center">
+  <img src="assets/demo-walkthrough.gif" alt="Animated terminal walkthrough of the real CLI on a synthetic case: case create, offline case-import of a Sherlock capture with sha256 and event id, source promote with recorded provenance, claim and confirmed supporting relation, analyze claim returning SUPPORTED_BUT_UNCONFIRMED with rule assess-r2, matching markdown report, case-export, and case-verify reporting manifest verified — all digests match." width="88%">
+</p>
+
+- `docs/demo/SAMPLE_REPORT.md` — the verbatim Markdown report from that
+  session. `docs/demo/USABILITY_PROTOCOL.md` — a three-tester first-run
+  protocol (not yet executed; no usability results exist).
 
 ## Catalogue counts (measured, tiered)
 
@@ -268,6 +298,7 @@ flowchart TB
   subgraph mid["Middle — services"]
     RP["reporting/{build,export}"]
     FT["fieldtools/{inspect,ocr,fetch,username}"]
+    ING["ingest/{registry,sherlock_csv,service}"]
   end
   subgraph inner["Inner — state & policy"]
     ST["storage/{database,repositories,workspace}"]
@@ -279,17 +310,36 @@ flowchart TB
     REG["registry/{catalog,importers}"]
     CFG["config/settings.py"]
   end
-  CLI --> RP & FT & ST & DOM & SEC
+  CLI --> RP & FT & ING & ST & DOM & SEC
   TUI --> ST & DOM & SEC & REG & CFG
   RP --> AN & ST & SEC
   FT --> SEC & DOM & CFG
+  ING --> SEC & DOM & ST
   AN --> DOM
   ST --> DOM
   REG --> DOM
 ```
 
 Layering rule: arrows point toward `core/domain.py`; `core/` is pure (no
-storage/network/TUI imports), enforced by review and tests.
+storage/network/TUI imports), enforced by review and tests. The arrow set is
+directional summary, not import-exact — e.g. `reporting/export` actually
+imports `core/{provenance,domain}`, and ingest sanitization runs CLI-side.
+The `ingest` package is deliberately offline: it imports no network-capable
+module (R-SEC-6, pinned by a test that trips on any socket use).
+
+## Documentation map
+
+| Start from | What it is |
+|---|---|
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, the gates every PR passes, catalogue/adapter rules |
+| [`docs/demo/run_synthetic_demo.sh`](docs/demo/run_synthetic_demo.sh) | Reproducible synthetic end-to-end demonstration |
+| [`docs/ingest/SHERLOCK_CSV_SCHEMA.md`](docs/ingest/SHERLOCK_CSV_SCHEMA.md) | Ingest fixture schema, provenance and rotation policy |
+| [`docs/architecture/evidence-lifecycle.mmd`](docs/architecture/evidence-lifecycle.mmd) | Editable source of the lifecycle diagram above |
+| [`docs/strategy/IMPLEMENTATION_STATUS.md`](docs/strategy/IMPLEMENTATION_STATUS.md) | Per-layer implementation status, dated |
+| [`docs/strategy/DECISIONS.md`](docs/strategy/DECISIONS.md) | Design decisions, newest last (D29/D30 among them) |
+| [`docs/strategy/RISK_REGISTER.md`](docs/strategy/RISK_REGISTER.md) | Adversarial review findings and residual risks |
+| `docs/strategy/*` | Working product-direction documents — honest but *internal*; the README's claims are what's supported |
+| [`docs/oovs/OOVS_MAPPING.md`](docs/oovs/OOVS_MAPPING.md) | OWASP OOVS self-mapping (maintainer self-assessment only) |
 
 ## Platform / provider notes
 
@@ -305,15 +355,14 @@ storage/network/TUI imports), enforced by review and tests.
 Code: [Apache-2.0](LICENSE). Catalogue data retains per-source attribution —
 `jivoi/awesome-osint` (CC BY-SA 4.0), `lockfale/OSINT-Framework` (MIT) —
 with project-authored descriptions; see
-`data/catalog/source-manifest.json` and `docs/strategy/RESEARCH_REGISTER.md`.
-No endorsement by any listed upstream is implied.
+`data/catalog/source-manifest.json` and
+`docs/strategy/RESEARCH_REGISTER.md`. No endorsement by any listed upstream
+is implied.
 
 ## Contributing & security
 
-Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Vulnerability reports:
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) — synthetic fixtures only,
+never commit real investigation data. Vulnerability reports:
 [SECURITY.md](SECURITY.md) (private reporting; no fake response SLA).
 Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Changelog:
-[CHANGELOG.md](CHANGELOG.md). Design decisions and risk register:
-`docs/strategy/`. OWASP OOVS v0.1.0 self-assessment:
-`docs/oovs/OOVS_MAPPING.md` (maintainer self-assessment only — no
-certification or endorsement claimed).
+[CHANGELOG.md](CHANGELOG.md).

@@ -348,9 +348,10 @@ class TestWorkspace:
         assert ws.verify_evidence(case.id, ev) is True
         # original unchanged
         assert hash_file(tmp) == ev.sha256
-        # stored copy is read-only
+        # stored copy is read-only AND exactly 0400 (THREAT_MODEL.md asset
+        # table: "evidence bytes …, mode 0400" — a control must be pinned)
         stored = ws.case_dir(case.id) / ev.storage_ref
-        assert (stored.stat().st_mode & 0o222) == 0
+        assert (stored.stat().st_mode & 0o777) == 0o400
 
     def test_attach_cross_case_source_rejected(self, settings, db, case_factory) -> None:
         a = case_factory("a")
