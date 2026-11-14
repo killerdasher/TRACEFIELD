@@ -12,6 +12,7 @@ on. Never crawls. Never submits case data anywhere.
 from __future__ import annotations
 
 import ipaddress
+from typing import NamedTuple
 from urllib.parse import urljoin
 
 import httpx
@@ -24,6 +25,20 @@ from tracefield.security.redact import redact_secrets
 from tracefield.security.urls import validate_host
 
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+
+class FetchResult(NamedTuple):
+    """Outcome of a successful fetch: the updated Source AND the body bytes.
+
+    The caller MUST persist ``body`` as content-addressed evidence — a
+    recorded sha256 without stored bytes is unverifiable and would break
+    the product's core integrity thesis.
+    """
+
+    source: Source
+    body: bytes
+    media_type: str
+    title: str
 
 
 class FetchError(Exception):
@@ -71,9 +86,11 @@ def _iter_public_addrs(hostname: str) -> list[str]:
         return []
 
 
-def fetch_source(source: Source, settings: Settings) -> Source:
-    """Fetch ``source.locator`` and return a new Source with collection
-    metadata. Never fabricates a snapshot on failure — raises FetchError.
+def fetch_source(source: Source, settings: Settings) -> FetchResult:
+    """Fetch ``source.locator`` and return a FetchResult: the Source with
+    collection metadata PLUS the raw body bytes (which the caller must
+    attach as evidence). Never fabricates a snapshot on failure — raises
+    FetchError.
 
     The caller (CLI) is responsible for preserving the original source
     record with the error note.
@@ -176,7 +193,12 @@ def fetch_source(source: Source, settings: Settings) -> Source:
     )
     if title:
         new.limitations = f"title={title[:200]}; " + new.limitations
-    return new
+    return FetchResult(
+        source=new,
+        body=body,
+        media_type=content_type or "application/octet-stream",
+        title=title,
+    )
 
 
 def _replace_host(url: str, host: str) -> str:

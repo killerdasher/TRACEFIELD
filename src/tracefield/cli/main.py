@@ -248,7 +248,8 @@ def doctor(
         author_part = (
             f"report author ({author_src}): {s(settings.report_author, 70)}"
             if settings.report_author
-            else "report author unset — reports will say 'author not set'"
+            else "report author unset — reports will say 'author not set' "
+            "(set TRACEFIELD_REPORT_AUTHOR or a 'report_author' value in config.toml)"
         )
         checks.append(
             {
@@ -326,7 +327,7 @@ def doctor(
                 "enabled": "green",
                 "none": "green",
             }.get(c["status"], "white")
-            table.add_row(c["name"], f"[{color}]{c['status']}[/{color}]", s(c["detail"], 120))
+            table.add_row(c["name"], f"[{color}]{c['status']}[/{color}]", s(c["detail"], 300))
         console.print(table)
         if any(c["status"] == "fail" for c in checks):
             err_console.print("[red]doctor found failing checks[/red]")
@@ -631,6 +632,7 @@ def source_add(
             access_method=AccessMethod.MANUAL,
             first_seen_at=utcnow(),
         )
+        fetched: dict[str, Any] | None = None  # set only on a successful fetch
 
         if fetch:
             from tracefield.fieldtools.fetch import FetchError, fetch_source
@@ -670,7 +672,7 @@ def source_add(
                         "(soft advisory; scope text is free-form)"
                     )
             try:
-                source = fetch_source(source, settings)
+                result = fetch_source(source, settings)
             except UrlPolicyError as exc:
                 fail(f"URL rejected by safety policy: {exc}", EXIT_NETWORK_BLOCKED)
             except FetchError as exc:
@@ -679,9 +681,39 @@ def source_add(
                     f"[yellow]warning:[/yellow] fetch failed, source registered "
                     f"with error note: {s(str(exc))}"
                 )
+            else:
+                source = result.source
+                fetched = {
+                    "body": result.body,
+                    "media_type": result.media_type,
+                    "title": result.title,
+                }
 
+        prior_same_locator = [
+            s for s in SourceRepo(db).list_for_case(case_obj.id) if s.locator == locator
+        ]
         SourceRepo(db).add(source)
         ws = CaseWorkspace(settings.cases_root, db)
+        evidence_id = ""
+        if fetched is not None:
+            # The recorded sha256 is only honest if the bytes it names are
+            # on disk: attach the fetched body as content-addressed,
+            # read-only evidence (chain event evidence.attach_bytes).
+            ev = ws.attach_bytes(
+                case_obj.id,
+                source.id,
+                fetched["body"],
+                media_type=fetched["media_type"],
+                excerpt=fetched["title"][:200],
+            )
+            evidence_id = ev.id
+        elif prior_same_locator:
+            console.print(
+                f"[yellow]warning:[/yellow] a source with this exact locator already "
+                f"exists in this case ({prior_same_locator[0].id}); you now have two "
+                "source rows for one origin — independence scoring treats them as "
+                "separate origins unless origin clustering merges them."
+            )
         _append_event(ws, case_obj.id, "source.add", [locator], [source.id])
 
         def render(src: dict[str, Any]) -> None:
@@ -692,6 +724,11 @@ def source_add(
                 console.print(f"  publisher: {s(src['publisher'], 120)}")
             if src.get("limitations"):
                 console.print(f"  note:    {s(src['limitations'], 300)}")
+            if evidence_id:
+                console.print(
+                    f"  evidence: {evidence_id} (content-addressed copy of the fetched bytes; "
+                    f"verify with: tracefield evidence verify {evidence_id} --case <case>)"
+                )
 
         emit(source.model_dump(), as_json, render)
     finally:
@@ -1311,7 +1348,12 @@ def observation_list(
 @relation_app.command("add")
 def relation_add(
     case: str = typer.Option(..., "--case", help="Case ID or title."),
-    from_id: str = typer.Option(..., "--from", help="Source record ID (origin)."),
+    from_id: str = typer.Option(
+        ...,
+        "--from",
+        help="Origin record ID (source/evidence for supports|corroborates|contradicts; "
+        "the --from side is counted as the independent origin).",
+    ),
     to_id: str = typer.Option(..., "--to", help="Target record ID (claim/evidence)."),
     kind: str = typer.Option(
         ...,
@@ -1344,6 +1386,41 @@ def relation_add(
             ev = EvidenceRepo(db).get(eid)
             if ev is None or ev.case_id != case_obj.id:
                 fail(f"evidence not found in this case: {eid!r}", EXIT_NOT_FOUND)
+        if from_id == to_id:
+            fail("relation endpoints must differ (--from == --to)", EXIT_USAGE)
+        # Both endpoints must exist in this case — a dangling id would sit in
+        # the store forever, invisible to every list that resolves records.
+
+        def endpoint_case_id(record_id: str) -> str | None:
+            for repo in (ClaimRepo(db), SourceRepo(db), EvidenceRepo(db)):
+                record = repo.get(record_id)
+                if record is not None:
+                    return record.case_id
+            row = db.execute("SELECT case_id FROM observations WHERE id=?", (record_id,)).fetchone()
+            return row["case_id"] if row else None
+
+        for endpoint in (from_id, to_id):
+            found_case = endpoint_case_id(endpoint)
+            if found_case is None or found_case != case_obj.id:
+                fail(
+                    f"relation endpoint not found in this case: {endpoint!r} "
+                    "(use the record's id — claim/src/ev/obs — from its create or list output)",
+                    EXIT_NOT_FOUND,
+                )
+        if rtype in (RelationType.SUPPORTS, RelationType.CORROBORATES):
+            # assess-r2 counts confirmed relations' from_id as independent
+            # origins. A claim as the origin would make the claim count as
+            # its own corroboration — refuse the mis-oriented shape (the
+            # README used to teach it; src -> claim is the canonical one).
+            maybe_claim = ClaimRepo(db).get(from_id)
+            if maybe_claim is not None and maybe_claim.case_id == case_obj.id:
+                fail(
+                    f"{rtype.value} relations run FROM a source/evidence origin TO the claim; "
+                    f"{from_id!r} is a claim. Use: relation add --from <source_id> "
+                    f"--to {from_id} --type {rtype.value} (otherwise the claim would "
+                    "count as its own independent origin).",
+                    EXIT_USAGE,
+                )
         rel = Relation(
             case_id=case_obj.id,
             from_id=from_id,

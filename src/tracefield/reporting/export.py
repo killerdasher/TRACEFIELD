@@ -221,5 +221,8 @@ def verify_manifest(export_dir: Path) -> tuple[bool, list[str]]:
             continue
         h = hashlib.sha256(path.read_bytes()).hexdigest()
         if h != entry["sha256"]:
-            problems.append(f"digest mismatch: {entry['storage_ref']}")
+            problems.append(
+                f"digest mismatch: {entry['storage_ref']} "
+                f"(manifest sha256 {entry['sha256']}, file now hashes {h})"
+            )
     return (not problems), problems

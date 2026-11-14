@@ -85,7 +85,10 @@ tracefield source add https://example.org/article --case demo   # metadata only
 tracefield claim add --case demo \
   --text "Example Corp announced a breach affecting 2026-03-01 records"
 tracefield evidence attach ./article.html --case demo --json
-tracefield relation add --case demo --from <claim_id> --to <evidence_id> \
+# attach auto-creates the source row; grab its id from --json ("source_id"),
+# then relate source -> claim (NOT claim -> evidence: assess-r2 counts the
+# --from side as the independent origin, so the origin must be the source):
+tracefield relation add --case demo --from <source_id> --to <claim_id> \
   --type supports --evidence <evidence_id> \
   --rationale "article text states the breach date"
 tracefield relation review <relation_id> --state confirmed

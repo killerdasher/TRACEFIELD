@@ -1,9 +1,44 @@
 # First-run usability test protocol (three independent users)
 
-Status: **protocol only — not yet executed. Nobody has completed this
-test.** No usability claims exist for TRACEFIELD; when this protocol has
-been run, results are recorded here or in a dated successor note with each
+Status: **protocol defined; first-run dry-run results recorded below (AI
+testers, 2026-11-14); human tester results still do not exist.** The two
+runs below were executed by independent fresh-context AI agents using only
+the README and `--help` (no source, no coaching) — a genuine unaided
+first-run proxy, but not human evidence. When three human testers have run
+this protocol, record results here or in a dated successor note with each
 tester's raw task log attached.
+
+## Dry-run results (2 independent fresh-context AI testers, 2026-11-14)
+
+Both testers completed every task **unaided** (Tester A: manual path —
+case → attach → claim → relation → analyze → report → export → verify →
+tamper; Tester B: ingest path — case-import of the committed Sherlock
+fixture → status → promote → claim → analyze → report, plus deliberate
+duplicate and garbage-import probes). Both verdicts: a competent new user
+can complete evidence-to-report unaided.
+
+Defects found by the runs and fixed in the same session (each pinned by
+regression tests in `tests/integration/test_tester_findings.py` and
+`tests/integration/test_fetch_persistence.py`):
+
+1. `source add --fetch` recorded the fetched body's sha256 but never
+   stored the bytes — the digest was unverifiable (found by a real online
+   case, not by the testers; HIGH). Fixed: fetches now attach
+   content-addressed evidence automatically.
+2. `relation add --type supports --from <claim_id>` was accepted, making a
+   claim corroborate itself under assess-r2 (README's old example taught
+   the shape). Fixed: refused with an actionable message; README teaches
+   source → claim; endpoints must now exist in the case.
+3. `source add` duplicated a locator silently. Fixed: loud warning naming
+   the existing source id.
+4. `doctor` flagged the unset report author without a remedy. Fixed: names
+   `TRACEFIELD_REPORT_AUTHOR` / `report_author` config key.
+5. case-verify tamper message now shows manifest vs observed digests.
+
+Known-but-accepted friction (documented, not defects): duplicate
+case-import is additive by design with a clear inline note; `--case` must
+be repeated per command (no active-case concept by design); promote's
+provenance string could be more key=value-structured.
 
 ## Purpose
 
