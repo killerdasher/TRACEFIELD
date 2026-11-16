@@ -4,6 +4,107 @@ All notable changes to TRACEFIELD are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.3.1 (reliability closure), 2026-11-16
+
+### Fixed
+
+- **Duplicate-source warning is now consistent across all source-creating
+  workflows.** In `source add`, the duplicate-locator check was computed
+  AFTER the fetch and the warning lived on an `elif` branch that required
+  no fetch, so a duplicate URL fetched successfully created a second
+  source row plus a second evidence capture with NO warning — and only
+  after spending the network request. The check now runs before any fetch
+  and the warning fires regardless of the fetch outcome; the record stays
+  additive (a re-fetch may legitimately capture different bytes — the new
+  capture is labelled as separate evidence in the warning). `evidence
+  attach` (which auto-creates the source row) now gives the same warning
+  when the resolved file path is already a source in the case; attaching
+  deliberately to an existing source via `--source` stays warning-free.
+  Warnings never merge or delete: duplicate rows remain (pinned by test),
+  and cross-case/same-URL behavior is pinned as warning-free.
+- **`CaseWorkspace.attach_bytes` is now atomic** (finding from the pre-
+  expansion review): it wrote the fetched body directly to the final
+  content-addressed path (`evidence/<2-char>/<sha256>`), unlike
+  `attach_file` and `store_raw_observation` which use temporary-file
+  replacement — an interrupted write could leave a truncated artifact at
+  the canonical digest path, and the `if not dest.exists()` idempotence
+  guard would then skip every retry, silently keeping corrupt evidence
+  that `evidence verify` reports but no retry can heal. It now writes to
+  a uniquely named temp in the same directory, flushes and fsyncs, chmods
+  0o600, atomically replaces into place, then chmods 0o400; the temp is
+  cleaned up on failure and no evidence row or chain event is recorded
+  for a failed write. Existing valid objects are never rewritten
+  (idempotence preserved, pinned by inode/mtime test); concurrent
+  same-digest writers cannot collide on the temp name and race benignly
+  (same digest ⇒ identical bytes ⇒ atomic replace either way).
+
+### Verified
+
+- 15 new regression tests in `tests/integration/test_reliability_closure.py`
+  (fail-before/pass-after for both findings). Full offline suite green;
+  ruff check/format and mypy clean. No commit/push in this phase.
+
+## [Unreleased] — 0.3.0 (entity core slice), 2026-11-16
+
+### Added
+
+- **Entity Core v1 (schema v2 → v3)**: four additive tables — `entities`
+  (recorded analytical objects with a typed `entity_type` and an
+  analyst-owned `canonical_label`), `entity_aliases` (alternative labels
+  with a deterministic `normalized` column; `UNIQUE(entity_id, normalized)`
+  so duplicate aliases are refused at the DB layer), `entity_mentions`
+  (traceable references from an EXISTING case record — source/evidence/
+  claim/observation/assertion — to an entity, typed `exact|stated|inferred`
+  describing HOW the reference was obtained, never whether it is true), and
+  `entity_match_candidates` (pairwise identity questions with the review
+  state on the candidate: `unreviewed|confirmed|rejected|unresolved`;
+  rejected candidates are RETAINED for audit). The migration is additive
+  only — no column or data changes anywhere — so a populated v2 database
+  migrates without rewriting it, an interrupted migration recovers (every
+  step is `IF NOT EXISTS`), and reopening is idempotent.
+- **DB-level referential integrity**: triggers refuse dangling or
+  cross-case references at write time (mentions and aliases must point at
+  an entity in the same case; a mention's `record_id` must resolve to a
+  real in-case source/evidence/claim/observation/assertion; match
+  endpoints must both be in-case entities) — the same
+  `trg_relations_integrity_*` discipline as existing relations. Case
+  deletion cascades entities, aliases, mentions, and candidates. There is
+  NO auto-merge and NO similarity scoring: a match candidate is a
+  question, decided only by an analyst.
+- **`entity` CLI sub-app** (a separate module, `src/tracefield/cli/
+  entities.py`; `main.py` gains only the two registration lines):
+  `entity add`, `entity alias`, `entity mention`, `entity list`,
+  `entity show`, `entity matches`, `entity match`, `entity review` —
+  exit-code contract preserved (usage → 3, not-found → 2, refusals → 3),
+  duplicate-alias/alias-equals-canonical/self-match/duplicate-pair
+  refusals surfaced as typed usage errors.
+- **Provenance discipline**: every entity action appends to the existing
+  hash-chained event stream (`entity.add`, `entity.alias.add`,
+  `entity.mention.add`, `entity.match.add`, `entity.match.review`);
+  `verify_chain` passes over chains containing them.
+- **Reports gain an Entities section (report schema v3 → v4)**: payload
+  adds `entities` (with aliases and mentions) and `match_candidates`;
+  Markdown and HTML render the section with honesty caveats ("recorded
+  analytical objects — not established real-world identities"; "nothing
+  is merged and no similarity score exists at this stage"). Renderers
+  tolerate payloads persisted under the previous report schema. HTML
+  escaping covers entity labels/aliases/notes (injection-tested).
+- **Tests**: 25 new tests in `tests/integration/test_entity_core.py`
+  covering migration paths (fresh, populated-v2 with record preservation,
+  idempotent reopen, interrupted-migration recovery), triggers (cross-case,
+  dangling, duplicate, self-match, pair canonicalization, cascade), the
+  full CLI flow, chain verification, and report honesty/determinism/
+  escaping. Suite: 416 offline tests green (391 prior + 25).
+
+### Not implemented (by decision, in this slice)
+
+- No merge or unmerge workflow (confirmed match candidates change
+  nothing — deduplication is a future, explicitly separate decision).
+- No fuzzy/name-similarity scoring, no auto-generated candidates, no
+  cross-case or cross-system entity resolution, no graph analytics.
+- Mention discovery is manual only: nothing crawls records for names.
+- TUI surfaces for entities are deferred; the CLI is the interface.
+
 ## [Unreleased] — 0.2.0 (ingest slice), 2026-11-07 → 2026-11-08
 
 ### Added

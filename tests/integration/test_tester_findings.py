@@ -62,7 +62,10 @@ def setup_case_with_claim_and_evidence(
     pathlib.Path(ev_file).write_text("synthetic note")
     code, out, _ = run_cli(monkeypatch, ["evidence", "attach", ev_file, "--case", title, "--json"])
     assert code == 0, out
-    payload = json.loads(out)
+    # Advisory warnings (e.g. the duplicate-source warning when this helper
+    # runs twice for one case) may precede the JSON object; parse from the
+    # first '{' instead of assuming a bare-JSON stdout.
+    payload = json.loads(out[out.index("{") :])
     code, out, _ = run_cli(monkeypatch, ["claim", "add", "--case", title, "--text", "c", "--json"])
     assert code == 0, out
     claim_id = json.loads(out)["id"]

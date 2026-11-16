@@ -27,9 +27,9 @@ from tracefield.storage.repositories import (
 )
 
 REPORT_SCHEMA_VERSION = (
-    3  # v3: the document block gains durable report identity (report_id,
-    # supersedes, superseded_by) plus correction records; additive to
-    # v2 (dissemination block) and v1
+    4  # v4: the payload gains an Entities section (Entity Core v1) — entity
+    # records with aliases, mentions, and match-candidate review states;
+    # additive to v3 (document identity) and earlier
 )
 
 
@@ -42,6 +42,28 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
     clusters = ClusterRepo(db).list_for_case(case.id)
     events = EventRepo(db).list_for_case(case.id)
     observations = ObservationRepo(db).list_for_case(case.id)
+
+    # Entity Core v1 (schema v3): recorded analytical objects with their
+    # aliases, traceable mentions, and pairwise match candidates. Only
+    # recorded, reviewable data enters the payload — never inferred facts.
+    from tracefield.storage.repositories import (
+        EntityAliasRepo,
+        EntityMatchRepo,
+        EntityMentionRepo,
+        EntityRepo,
+    )
+
+    entities = EntityRepo(db).list_for_case(case.id)
+    entity_payload = []
+    for e in entities:
+        entity_payload.append(
+            {
+                **e.model_dump(),
+                "aliases": [a.model_dump() for a in EntityAliasRepo(db).list_for_entity(e.id)],
+                "mentions": [m.model_dump() for m in EntityMentionRepo(db).list_for_entity(e.id)],
+            }
+        )
+    match_candidates = [m.model_dump() for m in EntityMatchRepo(db).list_for_case(case.id)]
 
     assessments = []
     clustered_ids = clustered_origin_ids(clusters)
@@ -87,6 +109,7 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
             "origin_clusters": len(clusters),
             "analysis_events": len(events),
             "observations": len(observations),
+            "entities": len(entities),
         },
         "sources": [s.model_dump() for s in sources],
         "claims": [c.model_dump() for c in claims],
@@ -95,6 +118,8 @@ def build_case_payload(settings: Settings, db: Database, case: Case) -> dict[str
         "assertions": [a.model_dump() for a in assertions],
         "origin_clusters": [c.model_dump() for c in clusters],
         "observations": [o.model_dump() for o in observations],
+        "entities": entity_payload,
+        "match_candidates": match_candidates,
         "assessments": assessments,
         "global_caveats": [
             "SHA-256 digests prove byte-level integrity of stored objects, not "
@@ -122,7 +147,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append(f"- **Created:** {case['created_at']}")
     lines.append(
         f"- **Records:** {counts['sources']} sources, {counts['claims']} claims, "
-        f"{counts['evidence']} evidence, {counts['relations']} relations"
+        f"{counts['evidence']} evidence, {counts['relations']} relations, "
+        f"{counts.get('entities', 0)} entities"
     )
     lines.append(f"- **Report schema:** v{payload['report_schema_version']}")
     lines.append(f"- **Generated:** {payload['generated_at']}")
@@ -233,6 +259,47 @@ def render_markdown(payload: dict[str, Any]) -> str:
                 lines.append(f"- Indicator: {ind}")
             lines.append("")
 
+    entities = payload.get("entities", [])
+    if entities:
+        lines.append("## Entities")
+        lines.append("")
+        lines.append(
+            "_Entities are recorded analytical objects — not established "
+            "real-world identities. Mentions record references, not proof; "
+            "mention classes describe how a reference was obtained._"
+        )
+        lines.append("")
+        for e in entities:
+            lines.append(f"### `{e['id']}` ({e['entity_type']})")
+            lines.append(f"- Label: {e['canonical_label']}")
+            for a in e["aliases"]:
+                lines.append(f"- Alias: {a['alias']} (normalized: {a['normalized']})")
+            if e["mentions"]:
+                lines.append(f"- Mentions ({len(e['mentions'])}):")
+                for m in e["mentions"]:
+                    lines.append(
+                        f"  - `{m['record_id']}` [{m['mention_class']}]"
+                        + (f" — {m['note']}" if m["note"] else "")
+                    )
+            else:
+                lines.append("- Mentions: none recorded")
+            lines.append("")
+        if payload.get("match_candidates"):
+            lines.append("### Identity match candidates (analyst decisions)")
+            lines.append("")
+            for m in payload["match_candidates"]:
+                lines.append(
+                    f"- `{m['id']}`: `{m['entity_a_id']}` vs `{m['entity_b_id']}` "
+                    f"— review: {m['review_state']}"
+                    + (f" — {m['review_note']}" if m["review_note"] else "")
+                )
+            lines.append(
+                "_A match candidate is a pairwise question. Confirmed/rejected are "
+                "analyst decisions retained for audit; nothing is merged and no "
+                "similarity score exists at this stage._"
+            )
+            lines.append("")
+
     lines.append("---")
     lines.append("")
     lines.append(
@@ -283,7 +350,8 @@ def render_html(payload: dict[str, Any]) -> str:
     out.append(f"<li><b>Created:</b> {_h(case['created_at'])}</li>")
     out.append(
         f"<li><b>Records:</b> {counts['sources']} sources, {counts['claims']} claims, "
-        f"{counts['evidence']} evidence, {counts['relations']} relations</li>"
+        f"{counts['evidence']} evidence, {counts['relations']} relations, "
+        f"{counts.get('entities', 0)} entities</li>"
     )
     out.append(f"<li><b>Report schema:</b> v{_h(payload['report_schema_version'])}</li>")
     out.append(f"<li><b>Generated:</b> {_h(payload['generated_at'])}</li>")
@@ -387,6 +455,47 @@ def render_html(payload: dict[str, Any]) -> str:
             for ind in c["indicators"]:
                 out.append(f"<li>Indicator: {_h(ind)}</li>")
             out.append("</ul>")
+
+    entities = payload.get("entities", [])
+    if entities:
+        out.append("<h2>Entities</h2>")
+        out.append(
+            '<p class="caveat">Entities are recorded analytical objects — not '
+            "established real-world identities. Mentions record references, "
+            "not proof; mention classes describe how a reference was obtained.</p>"
+        )
+        for e in entities:
+            out.append(f"<h3><code>{_h(e['id'])}</code> ({_h(e['entity_type'])})</h3><ul>")
+            out.append(f"<li>Label: {_h(e['canonical_label'])}</li>")
+            for a in e["aliases"]:
+                out.append(f"<li>Alias: {_h(a['alias'])} (normalized: {_h(a['normalized'])})</li>")
+            if e["mentions"]:
+                out.append(f"<li>Mentions ({_h(len(e['mentions']))}):</li><ul>")
+                for m in e["mentions"]:
+                    note = f" — {_h(m['note'])}" if m["note"] else ""
+                    out.append(
+                        f"<li><code>{_h(m['record_id'])}</code> "
+                        f"[{_h(m['mention_class'])}]{note}</li>"
+                    )
+                out.append("</ul>")
+            else:
+                out.append("<li>Mentions: none recorded</li>")
+            out.append("</ul>")
+        if payload.get("match_candidates"):
+            out.append("<h3>Identity match candidates (analyst decisions)</h3><ul>")
+            for m in payload["match_candidates"]:
+                note = f" — {_h(m['review_note'])}" if m["review_note"] else ""
+                out.append(
+                    f"<li><code>{_h(m['id'])}</code>: <code>{_h(m['entity_a_id'])}</code> "
+                    f"vs <code>{_h(m['entity_b_id'])}</code> — review: "
+                    f"{_h(m['review_state'])}{note}</li>"
+                )
+            out.append("</ul>")
+            out.append(
+                '<p class="caveat">A match candidate is a pairwise question. '
+                "Confirmed/rejected are analyst decisions retained for audit; "
+                "nothing is merged and no similarity score exists at this stage.</p>"
+            )
 
     out.append(
         '<p class="footer">Generated by TRACEFIELD. Assessment labels are '

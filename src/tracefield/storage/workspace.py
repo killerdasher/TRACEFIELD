@@ -128,8 +128,32 @@ class CaseWorkspace:
         digest = hash_bytes(data)
         dest = self.evidence_path(case_id, digest)
         if not dest.exists():
-            dest.write_bytes(data)
-            dest.chmod(0o400)
+            # Atomic publish: write to a UNIQUELY named temp in the same
+            # directory (same filesystem), fsync, then replace. A direct
+            # write to the canonical digest path could leave a truncated
+            # artifact there after an interruption — and the
+            # idempotence guard would then skip every retry, silently
+            # keeping corrupt evidence. Temp names are unique per call so
+            # concurrent identical writers cannot collide; os.replace is
+            # atomic, and same-digest payloads are byte-identical by
+            # construction, so racing replacements are benign.
+            import os
+            from uuid import uuid4
+
+            tmp = dest.with_name(f"{dest.name}.partial-{uuid4().hex[:12]}")
+            try:
+                with tmp.open("wb") as fout:
+                    fout.write(data)
+                    fout.flush()
+                    os.fsync(fout.fileno())
+                tmp.chmod(0o600)
+                tmp.replace(dest)
+                dest.chmod(0o400)  # read-only: originals immutable by default
+            finally:
+                # Cleanup on failure; after a successful replace the temp
+                # no longer exists and this is a no-op.
+                if tmp.exists():
+                    tmp.unlink()
         ev = EvidenceItem(
             case_id=case_id,
             source_id=source_id,

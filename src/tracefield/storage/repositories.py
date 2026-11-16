@@ -7,6 +7,7 @@ the network, TUI, or filesystem beyond the database handle they are given.
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any
 
 from tracefield.core.domain import (
@@ -28,9 +29,25 @@ from tracefield.core.domain import (
     ReviewState,
     Source,
     SourceType,
+    utcnow,
+)
+from tracefield.core.entities import (
+    Entity,
+    EntityAlias,
+    EntityMatchCandidate,
+    EntityMention,
+    EntityType,
+    MentionClass,
 )
 from tracefield.core.provenance import compute_event_digest
 from tracefield.storage.database import Database
+
+
+class RepositoryError(ValueError):
+    """A repository write was refused (duplicate, dangling, or cross-case
+    reference). Distinct from WorkspaceError so callers can distinguish
+    DB-level rejections from case-file workspace problems without a
+    storage-layer import cycle."""
 
 
 def _row_to_case(r: Any) -> Case:
@@ -773,3 +790,255 @@ class EventRepo:
                 return False, f"digest mismatch at event {ev.id}"
             prev = ev.digest or expected
         return True, f"ok ({len(events)} events)"
+
+
+# ---------------------------------------------------------------------------
+# Entity Core v1 (schema v3)
+# ---------------------------------------------------------------------------
+
+
+def _row_to_entity(r: Any) -> Entity:
+    return Entity(
+        id=r["id"],
+        case_id=r["case_id"],
+        entity_type=EntityType(r["entity_type"]),
+        canonical_label=r["canonical_label"],
+        notes=r["notes"],
+        created_at=r["created_at"],
+        updated_at=r["updated_at"],
+    )
+
+
+def _row_to_entity_alias(r: Any) -> EntityAlias:
+    return EntityAlias(
+        id=r["id"],
+        case_id=r["case_id"],
+        entity_id=r["entity_id"],
+        alias=r["alias"],
+        normalized=r["normalized"],
+        created_at=r["created_at"],
+    )
+
+
+def _row_to_entity_mention(r: Any) -> EntityMention:
+    return EntityMention(
+        id=r["id"],
+        case_id=r["case_id"],
+        entity_id=r["entity_id"],
+        record_id=r["record_id"],
+        mention_class=MentionClass(r["mention_class"]),
+        note=r["note"],
+        created_at=r["created_at"],
+    )
+
+
+def _row_to_entity_match(r: Any) -> EntityMatchCandidate:
+    return EntityMatchCandidate(
+        id=r["id"],
+        case_id=r["case_id"],
+        entity_a_id=r["entity_a_id"],
+        entity_b_id=r["entity_b_id"],
+        rationale=r["rationale"],
+        review_state=ReviewState(r["review_state"]),
+        review_note=r["review_note"],
+        created_at=r["created_at"],
+        reviewed_at=r["reviewed_at"],
+    )
+
+
+class EntityRepo:
+    """Entity Core v1 (Phase 22). Entities are recorded analytical objects,
+    never proven identities. All writes are case-scoped; cross-case
+    references are refused by DB triggers, not just application checks."""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def add(self, entity: Entity) -> Entity:
+        self.db.execute(
+            "INSERT INTO entities(id,case_id,entity_type,canonical_label,notes,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (
+                entity.id,
+                entity.case_id,
+                entity.entity_type.value,
+                entity.canonical_label,
+                entity.notes,
+                entity.created_at,
+                entity.updated_at,
+            ),
+        )
+        self.db.commit()
+        return entity
+
+    def get(self, entity_id: str) -> Entity | None:
+        r = self.db.execute("SELECT * FROM entities WHERE id=?", (entity_id,)).fetchone()
+        return _row_to_entity(r) if r else None
+
+    def list_for_case(self, case_id: str) -> list[Entity]:
+        rows = self.db.execute(
+            "SELECT * FROM entities WHERE case_id=? ORDER BY created_at, id", (case_id,)
+        ).fetchall()
+        return [_row_to_entity(r) for r in rows]
+
+    def touch(self, entity_id: str) -> None:
+        """Record that an entity's analytical content changed (updated_at)."""
+        self.db.execute("UPDATE entities SET updated_at=? WHERE id=?", (utcnow(), entity_id))
+        self.db.commit()
+
+
+class EntityAliasRepo:
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def add(self, alias: EntityAlias) -> EntityAlias:
+        try:
+            self.db.execute(
+                "INSERT INTO entity_aliases(id,case_id,entity_id,alias,normalized,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (
+                    alias.id,
+                    alias.case_id,
+                    alias.entity_id,
+                    alias.alias,
+                    alias.normalized,
+                    alias.created_at,
+                ),
+            )
+            self.db.commit()
+        except sqlite3.IntegrityError as exc:
+            raise RepositoryError(f"alias rejected: {exc}") from exc
+        return alias
+
+    def get(self, alias_id: str) -> EntityAlias | None:
+        r = self.db.execute("SELECT * FROM entity_aliases WHERE id=?", (alias_id,)).fetchone()
+        return _row_to_entity_alias(r) if r else None
+
+    def list_for_entity(self, entity_id: str) -> list[EntityAlias]:
+        rows = self.db.execute(
+            "SELECT * FROM entity_aliases WHERE entity_id=? ORDER BY created_at, id",
+            (entity_id,),
+        ).fetchall()
+        return [_row_to_entity_alias(r) for r in rows]
+
+    def find_duplicate(self, entity_id: str, normalized: str) -> EntityAlias | None:
+        r = self.db.execute(
+            "SELECT * FROM entity_aliases WHERE entity_id=? AND normalized=? LIMIT 1",
+            (entity_id, normalized),
+        ).fetchone()
+        return _row_to_entity_alias(r) if r else None
+
+
+class EntityMentionRepo:
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def add(self, mention: EntityMention) -> EntityMention:
+        try:
+            self.db.execute(
+                "INSERT INTO entity_mentions(id,case_id,entity_id,record_id,"
+                "mention_class,note,created_at) VALUES(?,?,?,?,?,?,?)",
+                (
+                    mention.id,
+                    mention.case_id,
+                    mention.entity_id,
+                    mention.record_id,
+                    mention.mention_class.value,
+                    mention.note,
+                    mention.created_at,
+                ),
+            )
+            self.db.commit()
+        except sqlite3.IntegrityError as exc:
+            raise RepositoryError(f"mention rejected: {exc}") from exc
+        return mention
+
+    def get(self, mention_id: str) -> EntityMention | None:
+        r = self.db.execute("SELECT * FROM entity_mentions WHERE id=?", (mention_id,)).fetchone()
+        return _row_to_entity_mention(r) if r else None
+
+    def list_for_entity(self, entity_id: str) -> list[EntityMention]:
+        rows = self.db.execute(
+            "SELECT * FROM entity_mentions WHERE entity_id=? ORDER BY created_at, id",
+            (entity_id,),
+        ).fetchall()
+        return [_row_to_entity_mention(r) for r in rows]
+
+    def list_for_record(self, record_id: str) -> list[EntityMention]:
+        rows = self.db.execute(
+            "SELECT * FROM entity_mentions WHERE record_id=? ORDER BY created_at, id",
+            (record_id,),
+        ).fetchall()
+        return [_row_to_entity_mention(r) for r in rows]
+
+
+class EntityMatchRepo:
+    """Pairwise identity questions. Review states live here, never on the
+    entities; a rejected candidate is RETAINED for audit; no merge occurs."""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def add(self, match: EntityMatchCandidate) -> EntityMatchCandidate:
+        # Canonical ordering so the same unordered pair cannot be filed twice.
+        if match.entity_a_id > match.entity_b_id:
+            match = match.model_copy(
+                update={"entity_a_id": match.entity_b_id, "entity_b_id": match.entity_a_id}
+            )
+        try:
+            self.db.execute(
+                "INSERT INTO entity_match_candidates(id,case_id,entity_a_id,entity_b_id,"
+                "rationale,review_state,review_note,created_at,reviewed_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    match.id,
+                    match.case_id,
+                    match.entity_a_id,
+                    match.entity_b_id,
+                    match.rationale,
+                    match.review_state.value,
+                    match.review_note,
+                    match.created_at,
+                    match.reviewed_at,
+                ),
+            )
+            self.db.commit()
+        except sqlite3.IntegrityError as exc:
+            raise RepositoryError(f"match candidate rejected: {exc}") from exc
+        return match
+
+    def get(self, match_id: str) -> EntityMatchCandidate | None:
+        r = self.db.execute(
+            "SELECT * FROM entity_match_candidates WHERE id=?", (match_id,)
+        ).fetchone()
+        return _row_to_entity_match(r) if r else None
+
+    def list_for_case(self, case_id: str) -> list[EntityMatchCandidate]:
+        rows = self.db.execute(
+            "SELECT * FROM entity_match_candidates WHERE case_id=? ORDER BY created_at, id",
+            (case_id,),
+        ).fetchall()
+        return [_row_to_entity_match(r) for r in rows]
+
+    def find_unordered_pair(
+        self, case_id: str, entity_a_id: str, entity_b_id: str
+    ) -> EntityMatchCandidate | None:
+        lo, hi = sorted((entity_a_id, entity_b_id))
+        r = self.db.execute(
+            "SELECT * FROM entity_match_candidates WHERE case_id=? AND entity_a_id=? "
+            "AND entity_b_id=? LIMIT 1",
+            (case_id, lo, hi),
+        ).fetchone()
+        return _row_to_entity_match(r) if r else None
+
+    def review(
+        self, match_id: str, state: ReviewState, note: str = ""
+    ) -> EntityMatchCandidate | None:
+        """Record an analyst decision. Rejected/unresolved rows are kept."""
+        self.db.execute(
+            "UPDATE entity_match_candidates SET review_state=?, review_note=?, "
+            "reviewed_at=? WHERE id=?",
+            (state.value, note, utcnow(), match_id),
+        )
+        self.db.commit()
+        return self.get(match_id)

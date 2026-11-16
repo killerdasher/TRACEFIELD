@@ -28,6 +28,10 @@ cases/
 *.sqlite
 *.sqlite3
 
+# LOOP durable-run state (continuity checkpoints, evaluator manifests,
+# fresh-review documents) — session-local, never committed
+.loop/
+
 # OS
 .DS_Store
 Thumbs.db

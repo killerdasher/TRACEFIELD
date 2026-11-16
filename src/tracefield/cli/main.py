@@ -105,6 +105,9 @@ app.add_typer(catalog_app, name="catalog")
 app.add_typer(username_app, name="username")
 app.add_typer(adapters_app, name="adapters")
 app.add_typer(caseimport_app, name="case-import")
+from tracefield.cli.entities import entity_app  # noqa: E402 — registered after helper definitions
+
+app.add_typer(entity_app, name="entity")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -634,6 +637,21 @@ def source_add(
         )
         fetched: dict[str, Any] | None = None  # set only on a successful fetch
 
+        prior_same_locator = [
+            s for s in SourceRepo(db).list_for_case(case_obj.id) if s.locator == locator
+        ]
+        if prior_same_locator:
+            # Detect BEFORE any fetch: a duplicate never justifies spending
+            # the network request unawares. The record stays additive — a
+            # re-fetch may legitimately capture different bytes, so the
+            # new capture is still recorded as separate evidence.
+            console.print(
+                f"[yellow]warning:[/yellow] a source with this exact locator already "
+                f"exists in this case ({prior_same_locator[0].id}); you now have two "
+                "source rows for one origin — independence scoring treats them as "
+                "separate origins unless origin clustering merges them."
+                + (" The new capture is still recorded as separate evidence." if fetch else "")
+            )
         if fetch:
             from tracefield.fieldtools.fetch import FetchError, fetch_source
             from tracefield.security import UrlPolicyError
@@ -707,13 +725,6 @@ def source_add(
                 excerpt=fetched["title"][:200],
             )
             evidence_id = ev.id
-        elif prior_same_locator:
-            console.print(
-                f"[yellow]warning:[/yellow] a source with this exact locator already "
-                f"exists in this case ({prior_same_locator[0].id}); you now have two "
-                "source rows for one origin — independence scoring treats them as "
-                "separate origins unless origin clustering merges them."
-            )
         _append_event(ws, case_obj.id, "source.add", [locator], [source.id])
 
         def render(src: dict[str, Any]) -> None:
@@ -1164,6 +1175,21 @@ def evidence_attach(
                 source_type=SourceType.LOCAL_FILE,
                 access_method=AccessMethod.PROVIDED,
             )
+            resolved = str(path.resolve())
+            prior_same_locator = [
+                s for s in SourceRepo(db).list_for_case(case_obj.id) if s.locator == resolved
+            ]
+            if prior_same_locator:
+                # Same warning contract as `source add`: a duplicate locator
+                # is warned, never merged or deleted — attaching the same
+                # file under an existing source via --source is deliberate
+                # and stays warning-free.
+                console.print(
+                    f"[yellow]warning:[/yellow] a source with this exact locator already "
+                    f"exists in this case ({prior_same_locator[0].id}); you now have two "
+                    "source rows for one origin — independence scoring treats them as "
+                    "separate origins unless origin clustering merges them."
+                )
             src_repo.add(src)
 
         from tracefield.fieldtools.inspect import detect_media_type

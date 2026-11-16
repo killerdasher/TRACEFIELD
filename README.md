@@ -93,6 +93,12 @@ tracefield relation add --case demo --from <source_id> --to <claim_id> \
   --rationale "article text states the breach date"
 tracefield relation review <relation_id> --state confirmed
 tracefield analyze claim <claim_id> --case demo --json
+tracefield entity add --label "Example Corp" --case demo --type organisation
+tracefield entity alias --entity <entity_id> --alias "ExCorp" --case demo
+tracefield entity mention --entity <entity_id> --record <evidence_id> \
+  --case demo --class exact
+tracefield entity match --a <entity_a> --b <entity_b> --case demo
+tracefield entity review <match_id> --state confirmed --case demo
 tracefield report demo --format markdown
 tracefield case-export demo --output ./demo-export
 tracefield case-verify ./demo-export    # anyone can re-check the bundle
@@ -185,6 +191,7 @@ omitted, for legibility.
 | `hash` / `inspect [--deep]` / `ocr` | **implemented** | Backends optional; UNAVAILABLE is honest |
 | `fetch --fetch` (SSRF-guarded) / `username check` | **implemented** | Fetch: opt-in + recorded scope grant; username checks: env-gated, soft-404 markers, 1 req/s, no bulk mode |
 | Offline ingest (Sherlock `--csv`) | **implemented (0.2)** | `case-import --file` + `case-import status` + `source promote/dismiss/defer`; format/version gate, fail-closed refusals, `raw_ref` into the immutable 0o400 copy, hash-chained review events, zero egress; version-pinned fixture (`sherlock_v0.16.2_…2026-11-07.csv`) + schema doc + rotation policy |
+| Entity core (records, aliases, mentions, match candidates) | **implemented (0.3)** | `entity add/alias/mention/list/show/match/matches/review`; DB-level integrity triggers (cross-case/dangling refused); every action on the hash chain; reviews decide pairwise questions — **nothing is merged, no similarity score exists**; an entity is a recorded label container, never an established identity |
 | Tool catalogue + tiered `tools status` | **implemented** | 2,264 inert records; counts never padded |
 | TUI | **experimental** | Keyboard workflow tested headless; active-case model + `c` case picker; ingest triage overlay (`t`) and cancellable import op (`i`) |
 | Structured logging (JSONL audit) | **implemented** | `command`/`fail`/`unhandled` events; redacted, capped, `0600` |
@@ -289,6 +296,12 @@ provenance and licence rules: `data/catalog/source-manifest.json` and
 - Performance is recorded as a baseline, not a benchmark claim: TUI
   switch+load ~0.9 s at 5,000 rows, `build_report` sub-millisecond on small
   cases (`PHASE_07_REPORT_TESTING.md`).
+- Entity core (0.3) records identities-related data but resolves nothing:
+  no merge or unmerge exists (a confirmed match candidate changes no
+  records), there is no fuzzy matching or scoring, mention discovery is
+  manual, and deduplication/identity-resolution is deliberately out of
+  scope until designed as a separate, reviewable step. Entity surfaces are
+  CLI-only in this slice; the TUI does not show entities yet.
 
 ## Architecture
 

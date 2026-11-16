@@ -17,7 +17,7 @@ from tracefield import SCHEMA_VERSION
 # Tripwire: a SCHEMA_VERSION bump is only valid together with a matching
 # stepwise migration in _MIGRATIONS below — every past version must remain
 # rerunnable so old databases keep opening.
-assert SCHEMA_VERSION == 2, "add a migration for the new schema version"
+assert SCHEMA_VERSION == 3, "add a migration for the new schema version"
 
 _MIGRATION_1 = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -395,7 +395,156 @@ BEGIN
 END;
 """
 
-_MIGRATIONS: dict[int, str] = {1: _MIGRATION_1, 2: _MIGRATION_2}
+_MIGRATION_3 = """
+-- Schema v3: Entity Core v1 (Phase 22). Additive only — four new tables
+-- with case-scoped integrity triggers, no column or data changes anywhere,
+-- so a v2 database migrates without rewriting it.
+
+-- Entities: recorded analytical objects. An entity row is a case-local
+-- label container, NOT proof that a real-world identity exists.
+CREATE TABLE IF NOT EXISTS entities (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    entity_type TEXT NOT NULL DEFAULT 'other',
+    canonical_label TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entities_case ON entities(case_id);
+CREATE INDEX IF NOT EXISTS idx_entities_label ON entities(canonical_label);
+
+-- Aliases: alternative labels, with a deterministic normalized column so
+-- duplicate aliases are rejected at the DB layer. Provenance is the
+-- creation timestamp + the audit event recorded by the CLI.
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    alias TEXT NOT NULL,
+    normalized TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(entity_id, normalized)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_aliases_entity ON entity_aliases(entity_id);
+
+-- Mentions: traceable references from an existing case record to an
+-- entity. record_id is polymorphic (source/evidence/claim/observation/
+-- assertion) and validated at write time exactly like relations endpoints:
+-- a missing, cross-case, or invented id is corruption and is refused.
+CREATE TABLE IF NOT EXISTS entity_mentions (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    record_id TEXT NOT NULL,
+    mention_class TEXT NOT NULL DEFAULT 'stated',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON entity_mentions(entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_record ON entity_mentions(record_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_entity_mentions_integrity_ins
+BEFORE INSERT ON entity_mentions
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_mentions.entity_id must reference an entity in the same case') END;
+
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM sources WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM evidence WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM claims WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM observations WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM assertions WHERE id = NEW.record_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_mentions.record_id must reference a record in the same case') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_entity_mentions_integrity_upd
+BEFORE UPDATE OF entity_id, record_id, case_id ON entity_mentions
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_mentions.entity_id must reference an entity in the same case') END;
+
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM sources WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM evidence WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM claims WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM observations WHERE id = NEW.record_id AND case_id = NEW.case_id
+        UNION ALL SELECT 1 FROM assertions WHERE id = NEW.record_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_mentions.record_id must reference a record in the same case') END;
+END;
+
+-- Match candidates: pairwise identity QUESTIONS between two entities of
+-- one case. The review state lives on the candidate, never on the
+-- entities; a rejected candidate is retained for audit; nothing here
+-- merges entity records and no similarity score is stored.
+CREATE TABLE IF NOT EXISTS entity_match_candidates (
+    id TEXT PRIMARY KEY,
+    case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    entity_a_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    entity_b_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    rationale TEXT NOT NULL DEFAULT '',
+    review_state TEXT NOT NULL DEFAULT 'unreviewed',
+    review_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_entity_matches_case ON entity_match_candidates(case_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_entity_matches_integrity_ins
+BEFORE INSERT ON entity_match_candidates
+BEGIN
+    SELECT CASE WHEN NEW.entity_a_id = NEW.entity_b_id
+    THEN RAISE(ABORT, 'entity_match_candidates endpoints must differ') END;
+
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_a_id AND case_id = NEW.case_id
+    ) OR NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_b_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_match_candidates endpoints must be entities in the same case') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_entity_matches_integrity_upd
+BEFORE UPDATE OF entity_a_id, entity_b_id, case_id ON entity_match_candidates
+BEGIN
+    SELECT CASE WHEN NEW.entity_a_id = NEW.entity_b_id
+    THEN RAISE(ABORT, 'entity_match_candidates endpoints must differ') END;
+
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_a_id AND case_id = NEW.case_id
+    ) OR NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_b_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_match_candidates endpoints must be entities in the same case') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_entity_aliases_integrity_ins
+BEFORE INSERT ON entity_aliases
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_aliases.entity_id must reference an entity in the same case') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_entity_aliases_integrity_upd
+BEFORE UPDATE OF entity_id, case_id ON entity_aliases
+BEGIN
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM entities WHERE id = NEW.entity_id AND case_id = NEW.case_id
+    )
+    THEN RAISE(ABORT, 'entity_aliases.entity_id must reference an entity in the same case') END;
+END;
+"""
+
+_MIGRATIONS: dict[int, str] = {1: _MIGRATION_1, 2: _MIGRATION_2, 3: _MIGRATION_3}
 
 
 class SchemaVersionError(RuntimeError):

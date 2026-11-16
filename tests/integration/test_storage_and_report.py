@@ -42,14 +42,14 @@ class TestMigrations:
         from tracefield import SCHEMA_VERSION
 
         db = Database(settings.db_path)
-        assert db.schema_version == SCHEMA_VERSION == 2
+        assert db.schema_version == SCHEMA_VERSION == 3
         db.close()
 
     def test_migrate_is_idempotent(self, settings) -> None:
         db = Database(settings.db_path)
         db.migrate()
         db.migrate()
-        assert db.schema_version == 2
+        assert db.schema_version == 3
         db.close()
 
     def test_migration_from_v1_database(self, settings) -> None:
@@ -71,7 +71,7 @@ class TestMigrations:
         old.close()
 
         db = Database(path)  # opens and migrates in __init__
-        assert db.schema_version == 2
+        assert db.schema_version == 3
         row = db.execute("SELECT title FROM cases WHERE id='case_x'").fetchone()
         assert row is not None and row["title"] == "x"
         # New tables exist and report the guard triggers are installed.
@@ -419,7 +419,7 @@ class TestReportAndExport:
     def test_json_report_valid_and_versioned(self, settings, db, case_factory) -> None:
         case, _ = self._seed(settings, db, case_factory)
         payload = json.loads(build_report(settings, db, case, fmt="json"))
-        assert payload["report_schema_version"] == 3
+        assert payload["report_schema_version"] == 4
         assert payload["case"]["id"] == case.id
         assert payload["global_caveats"]
         # Dissemination block (OOVS-09): generated_at, tool, author/revision/
