@@ -24,7 +24,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "typer>=0.15,<0.28",
+  "typer>=0.15,<0.30",
   "click>=8.1,<9",
   "rich>=13.9,<16",
   "textual>=8.2,<9",
